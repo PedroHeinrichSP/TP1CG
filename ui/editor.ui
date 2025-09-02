@@ -1,0 +1,134 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<ui version="4.0">
+ <class>MainWindow</class>
+ <widget class="QMainWindow" name="MainWindow">
+  <property name="geometry">
+   <rect>
+    <x>0</x>
+    <y>0</y>
+    <width>1000</width>
+    <height>700</height>
+   </rect>
+  </property>
+  <property name="windowTitle">
+   <string>Editor Gráfico - TP1CG</string>
+  </property>
+  <widget class="QWidget" name="centralwidget">
+   <layout class="QVBoxLayout" name="verticalLayout">
+    <item>
+     <layout class="QHBoxLayout" name="toolbarLayout">
+      <item>
+       <widget class="QComboBox" name="comboRender">
+        <item>
+         <property name="text">
+          <string>DDA</string>
+         </property>
+        </item>
+        <item>
+         <property name="text">
+          <string>Bresenham</string>
+         </property>
+        </item>
+       </widget>
+      </item>
+      <item>
+       <widget class="QToolButton" name="colorButton">
+        <property name="text">
+         <string></string>
+        </property>
+        <property name="minimumSize">
+         <size>
+          <width>30</width>
+          <height>30</height>
+         </size>
+        </property>
+        <property name="styleSheet">
+         <string notr="true">background: rgb(200,0,0);</string>
+        </property>
+       </widget>
+      </item>
+      <item>
+       <widget class="QToolButton" name="toolPointBtn">
+        <property name="text"><string>Ponto</string></property>
+       </widget>
+      </item>
+      <item>
+       <widget class="QToolButton" name="toolLineBtn">
+        <property name="text"><string>Reta</string></property>
+       </widget>
+      </item>
+      <item>
+       <widget class="QToolButton" name="toolCircleBtn">
+        <property name="text"><string>Círculo</string></property>
+       </widget>
+      </item>
+      <item>
+       <widget class="QToolButton" name="toolPolyBtn">
+        <property name="text"><string>Polígono</string></property>
+       </widget>
+      </item>
+      <item>
+       <widget class="QComboBox" name="comboClipping">
+        <item>
+         <property name="text"><string>None</string></property>
+        </item>
+        <item>
+         <property name="text"><string>Cohen-Sutherland</string></property>
+        </item>
+        <item>
+         <property name="text"><string>Liang-Barsky</string></property>
+        </item>
+       </widget>
+      </item>
+      <item>
+       <widget class="QToolButton" name="btnNew">
+        <property name="text"><string>Novo</string></property>
+       </widget>
+      </item>
+      <item>
+       <widget class="QToolButton" name="btnSave">
+        <property name="text"><string>Salvar</string></property>
+       </widget>
+      </item>
+      <item>
+       <widget class="QToolButton" name="btnLoad">
+        <property name="text"><string>Carregar</string></property>
+       </widget>
+      </item>
+      <item>
+       <widget class="QToolButton" name="btnExport">
+        <property name="text"><string>Exportar PNG</string></property>
+       </widget>
+      </item>
+     </layout>
+    </item>
+    <item>
+     <layout class="QHBoxLayout" name="mainLayout">
+      <item>
+       <widget class="QFrame" name="canvasPlaceholder">
+        <property name="frameShape">
+         <enum>QFrame::StyledPanel</enum>
+        </property>
+        <property name="minimumSize">
+         <size>
+          <width>720</width>
+          <height>520</height>
+         </size>
+        </property>
+       </widget>
+      </item>
+      <item>
+       <widget class="QListWidget" name="listObjects">
+        <property name="minimumWidth">
+         <number>200</number>
+        </property>
+       </widget>
+      </item>
+     </layout>
+    </item>
+   </layout>
+  </widget>
+ </widget>
+ <resources/>
+ <connections/>
+</ui>
