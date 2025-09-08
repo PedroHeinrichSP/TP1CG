@@ -35,5 +35,3 @@ python main.py
 - O checkbox “Grid” liga/desliga a grade desenhada entre as células do buffer lógico.
 - Clique no seletor de cor para mudar a cor de desenho.
 - Selecione objetos na árvore lateral; clique direito sobre a bounding box para transformar (transladar/rotacionar/escalar/refletir).
-
-Observação: sempre há um método de recorte selecionado (Cohen-Sutherland ou Liang-Barsky) para a ferramenta de recorte.
