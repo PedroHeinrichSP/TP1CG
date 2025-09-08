@@ -43,7 +43,7 @@
          </size>
         </property>
         <property name="styleSheet">
-         <string notr="true">background: rgb(200,0,0);</string>
+         <string notr="true">background: rgba(0, 0, 0, 1);</string>
         </property>
        </widget>
       </item>
@@ -83,21 +83,6 @@
       <item>
        <widget class="QToolButton" name="btnNew">
         <property name="text"><string>Novo</string></property>
-       </widget>
-      </item>
-      <item>
-       <widget class="QToolButton" name="btnSave">
-        <property name="text"><string>Salvar</string></property>
-       </widget>
-      </item>
-      <item>
-       <widget class="QToolButton" name="btnLoad">
-        <property name="text"><string>Carregar</string></property>
-       </widget>
-      </item>
-      <item>
-       <widget class="QToolButton" name="btnExport">
-        <property name="text"><string>Exportar PNG</string></property>
        </widget>
       </item>
      </layout>

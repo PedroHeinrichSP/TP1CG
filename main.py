@@ -1,9 +1,8 @@
 from PyQt6 import uic, QtWidgets, QtGui, QtCore
 import sys
 import os
-import json
 
-from utils.drawable import Drawing, Point, Line, Circle, Poligon
+from utils.drawable import Drawing, Point, Line, Circle, Polygon
 from utils.algorithms import Transformations, DDA, BresenhamLines, BresenhamCircle, ClippingCS, ClippingLB
 
 
@@ -23,26 +22,41 @@ class CanvasWidget(QtWidgets.QWidget):
 		self.drag_start = None
 		self.setFocusPolicy(QtCore.Qt.FocusPolicy.ClickFocus)
 
+	# Pinta a bounding box
 	def paintEvent(self, event):
 		painter = QtGui.QPainter(self)
-		# scale buffer to widget size using fast transformation (nearest-neighbor) to keep pixels sharp
 		scaled = self.buffer.scaled(self.width(), self.height(), QtCore.Qt.AspectRatioMode.IgnoreAspectRatio, QtCore.Qt.TransformationMode.FastTransformation)
 		painter.drawImage(0, 0, scaled)
-		# draw selection bbox if any (converted to widget coords)
 		sel = self.controller.selected_index
 		if sel is not None and 0 <= sel < len(self.controller.objects):
 			obj = self.controller.objects[sel]
 			rect_buf = self.controller.compute_bounding_rect_buf(obj)
 			if rect_buf:
 				rect_widget = self.buffer_rect_to_widget(rect_buf)
-				pen = QtGui.QPen(QtGui.QColor('blue'))
+				pen = QtGui.QPen(QtGui.QColor('purple'))
 				pen.setStyle(QtCore.Qt.PenStyle.DashLine)
 				pen.setWidth(2)
 				painter.setPen(pen)
 				painter.drawRect(rect_widget)
 
+	# TODO: Corrigir logica
+	def drawGrid(self):
+		# Cria um QPainter para desenhar diretamente no buffer
+		painter = QtGui.QPainter(self.buffer)
+		painter.setPen(QtGui.QPen(QtGui.QColor(150, 150, 150), 1, QtCore.Qt.PenStyle.DotLine))  # Linhas cinza claro pontilhadas
+
+		# Desenha linhas verticais
+		for x in range(0, self.buffer.width()):
+			painter.drawLine(x, 0, x, self.buffer.height())
+
+		# Desenha linhas horizontais
+		for y in range(0, self.buffer.height()):
+			painter.drawLine(0, y, self.buffer.width(), y)
+
+		painter.end()  # Finaliza o desenho no buffer
+
 	def set_pixel(self, x, y, color):
-		# x,y are in buffer coordinates
+		# colore pixel
 		if 0 <= x < self.buffer.width() and 0 <= y < self.buffer.height():
 			col = QtGui.QColor(color)
 			self.buffer.setPixelColor(int(x), int(y), col)
@@ -95,9 +109,9 @@ class MainWindow(QtWidgets.QMainWindow):
 		uic.loadUi(ui_path, self)
 
 		# state
-		self.current_color = '#c80000'
+		self.current_color = "#000000"
 		self.current_tool = 'point'
-		self.objects = []  # list of dicts: {type, obj, color}
+		self.objects = []
 		self.selected_index = None
 		self.temp_points = []
 
@@ -117,9 +131,6 @@ class MainWindow(QtWidgets.QMainWindow):
 		self.toolCircleBtn.clicked.connect(lambda: self.set_tool('circle'))
 		self.toolPolyBtn.clicked.connect(lambda: self.set_tool('polygon'))
 		self.btnNew.clicked.connect(self.action_new)
-		self.btnSave.clicked.connect(self.action_save)
-		self.btnLoad.clicked.connect(self.action_load)
-		self.btnExport.clicked.connect(self.action_export)
 		self.listObjects.itemSelectionChanged.connect(self.on_list_selection)
 
 		# initial UI setup
@@ -137,7 +148,7 @@ class MainWindow(QtWidgets.QMainWindow):
 			self.colorButton.setStyleSheet(f'background: {self.current_color};')
 
 	def action_new(self):
-		# request buffer resolution (small) to make raster differences visible
+		# request buffer resolution
 		w, ok = QtWidgets.QInputDialog.getInt(self, 'Largura (pixels)', 'Largura (buffer):', 80, 4, 200)
 		if not ok: return
 		h, ok = QtWidgets.QInputDialog.getInt(self, 'Altura (pixels)', 'Altura (buffer):', 80, 4, 200)
@@ -151,149 +162,72 @@ class MainWindow(QtWidgets.QMainWindow):
 		self.objects.clear()
 		self.listObjects.clear()
 		self.selected_index = None
+		self.canvas.drawGrid()
 
-	def action_save(self):
-		path, _ = QtWidgets.QFileDialog.getSaveFileName(self, 'Salvar projeto', filter='JSON Files (*.json)')
-		if not path: return
-		data = {
-			'buffer_width': self.canvas.buffer_w,
-			'buffer_height': self.canvas.buffer_h,
-			'objects': []
-		}
-		for item in self.objects:
-			typ = item['type']
-			col = item.get('color', '#000')
-			if typ == 'point':
-				p = item['obj']
-				data['objects'].append({'type':'point','x':p.x,'y':p.y,'color':col})
-			elif typ == 'line':
-				l = item['obj']
-				data['objects'].append({'type':'line','ax':l.pointA.x,'ay':l.pointA.y,'bx':l.pointB.x,'by':l.pointB.y,'color':col})
-			elif typ == 'circle':
-				c = item['obj']
-				data['objects'].append({'type':'circle','cx':c.center.x,'cy':c.center.y,'r':c.radius,'color':col})
-			elif typ == 'polygon':
-				lines = item['obj'].Lines
-				pts = []
-				for ln in lines:
-					pts.append({'ax':ln.pointA.x,'ay':ln.pointA.y,'bx':ln.pointB.x,'by':ln.pointB.y})
-				data['objects'].append({'type':'polygon','lines':pts,'color':col})
-		with open(path, 'w') as f:
-			json.dump(data, f, indent=2)
 
-	def action_load(self):
-		path, _ = QtWidgets.QFileDialog.getOpenFileName(self, 'Abrir projeto', filter='JSON Files (*.json)')
-		if not path: return
-		with open(path, 'r') as f:
-			data = json.load(f)
-		# recreate canvas with buffer size from file
-		bw, bh = data.get('buffer_width', 80), data.get('buffer_height', 80)
-		self.canvas.setParent(None)
-		self.canvas = CanvasWidget(self, buffer_width=bw, buffer_height=bh)
-		Drawing.set_canvas(self.canvas)
-		self.canvasPlaceholder.layout().addWidget(self.canvas)
-		self.canvas.clear()
-		self.objects.clear()
-		self.listObjects.clear()
-		for obj in data.get('objects', []):
-			col = obj.get('color', '#000')
-			if obj['type'] == 'point':
-				p = Point(obj['x'], obj['y'])
-				self.add_object('point', p, col)
-			elif obj['type'] == 'line':
-				a = Point(obj['ax'], obj['ay'])
-				b = Point(obj['bx'], obj['by'])
-				self.add_object('line', Line(a,b), col)
-			elif obj['type'] == 'circle':
-				c = Circle(Point(obj['cx'], obj['cy']), obj['r'])
-				self.add_object('circle', c, col)
-			elif obj['type'] == 'polygon':
-				lines = []
-				for ln in obj['lines']:
-					lines.append(Line(Point(ln['ax'],ln['ay']), Point(ln['bx'],ln['by'])))
-				poly = Poligon(lines)
-				self.add_object('polygon', poly, col)
-		self.redraw_all()
 
-	def action_export(self):
-		path, _ = QtWidgets.QFileDialog.getSaveFileName(self, 'Exportar PNG', filter='PNG Files (*.png)')
-		if not path: return
-		# save the buffer scaled to the current widget size for better visibility
-		scaled = self.canvas.buffer.scaled(self.canvas.width(), self.canvas.height(), QtCore.Qt.AspectRatioMode.IgnoreAspectRatio, QtCore.Qt.TransformationMode.FastTransformation)
-		scaled.save(path)
-
-	def add_object(self, typ, obj, color):
-		self.objects.append({'type':typ,'obj':obj,'color':color})
-		self.listObjects.addItem(f"{typ} #{len(self.objects)-1}")
+	def add_object(self, obj):
+		self.objects.append({'obj':obj})
+		if isinstance(obj,Point):
+			self.listObjects.addItem(f"Point #{len(self.objects)-1}")
+		elif isinstance(obj,Line):
+			self.listObjects.addItem(f"Line #{len(self.objects)-1}")
+		elif isinstance(obj,Circle):
+			self.listObjects.addItem(f"Circle #{len(self.objects)-1}")
+		elif isinstance(obj,Polygon):
+			self.listObjects.addItem(f"Polygon #{len(self.objects)-1}")
 
 	def redraw_all(self):
 		self.canvas.clear()
 		for item in self.objects:
-			typ = item['type']
-			col = item.get('color', '#000')
-			if typ == 'point':
-				p = item['obj']
-				Drawing.paintPixel(int(p.x), int(p.y), col)
-			elif typ == 'line':
-				l = item['obj']
-				# clip if needed
-				clip = self.comboClipping.currentText()
-				if clip == 'Cohen-Sutherland':
-					cs = ClippingCS(0, self.canvas.buffer_w-1, 0, self.canvas.buffer_h-1)
-					clipped = cs.clip(l.pointA, l.pointB)
-					if clipped is not None:
-						ldraw = clipped
-					else:
-						ldraw = None
+			item = item['obj'] 
+			if isinstance(item, Point):
+				Drawing.paintPixel(int(item.x), int(item.y), item.color)
+			elif isinstance(item, Line):
+				if self.comboRender.currentText() == 'DDA':
+					DDA().rasterizeLine(item)
 				else:
-					ldraw = l
-				if ldraw:
+					BresenhamLines().rasterizeLine(item)
+			elif isinstance(item, Circle):
+				BresenhamCircle().rasterize(item)
+			elif isinstance(item, Polygon):
+				for ln in item.lines:
 					if self.comboRender.currentText() == 'DDA':
-						DDA().rasterizeLine(ldraw, col)
+						DDA().rasterizeLine(ln)
 					else:
-						BresenhamLines().rasterizeLine(ldraw, col)
-			elif typ == 'circle':
-				c = item['obj']
-				BresenhamCircle().rasterize(c, col)
-			elif typ == 'polygon':
-				poly = item['obj']
-				for ln in poly.Lines:
-					if self.comboRender.currentText() == 'DDA':
-						DDA().rasterizeLine(ln, item.get('color', '#000'))
-					else:
-						BresenhamLines().rasterizeLine(ln, item.get('color', '#000'))
+						BresenhamLines().rasterizeLine(ln)
 
 	def on_list_selection(self):
 		items = self.listObjects.selectedIndexes()
 		if items:
 			self.selected_index = items[0].row()
+			item = self.objects[self.selected_index]
+			item = item['obj']
+			print(item.__str__())
 		else:
 			self.selected_index = None
 		self.canvas.update()
 
 	def compute_bounding_rect(self, item):
-		typ = item['type']
+		item = item['obj'] 
 		xs, ys = [], []
-		if typ == 'point':
-			p = item['obj']
-			xs = [p.x]
-			ys = [p.y]
-		elif typ == 'line':
-			l = item['obj']
-			xs = [l.pointA.x, l.pointB.x]
-			ys = [l.pointA.y, l.pointB.y]
-		elif typ == 'circle':
-			c = item['obj']
-			xs = [c.center.x - c.radius, c.center.x + c.radius]
-			ys = [c.center.y - c.radius, c.center.y + c.radius]
-		elif typ == 'polygon':
-			for ln in item['obj'].Lines:
+		if isinstance(item, Point):
+			xs = [item.x, item.x]
+			ys = [item.y, item.y]
+		elif isinstance(item, Line):
+			xs = [item.pointA.x, item.pointB.x]
+			ys = [item.pointA.y, item.pointB.y]
+		elif isinstance(item, Circle):
+			xs = [item.center.x - item.radius, item.center.x + item.radius]
+			ys = [item.center.y - item.radius, item.center.y + item.radius]
+		elif isinstance(item, Polygon):
+			for ln in item.lines:
 				xs += [ln.pointA.x, ln.pointB.x]
 				ys += [ln.pointA.y, ln.pointB.y]
 		if not xs: return None
 		x1, x2 = int(min(xs)), int(max(xs))
 		y1, y2 = int(min(ys)), int(max(ys))
-		return QtCore.QRect(x1, y1, x2 - x1, y2 - y1)
+		return QtCore.QRect(x1, y1, x2 - x1 + 1, y2 - y1 + 1)
 
 	def compute_bounding_rect_buf(self, item):
 		# same as compute_bounding_rect but returns QRect in buffer coordinates
@@ -303,30 +237,21 @@ class MainWindow(QtWidgets.QMainWindow):
 		# map widget coords to buffer coords
 		bx, by = self.canvas.widget_to_buffer(x, y)
 		if self.current_tool == 'point':
-			p = Point(bx, by)
-			self.add_object('point', p, self.current_color)
-			Drawing.paintPixel(bx, by, self.current_color)
+			p = Point(bx, by, self.current_color)
+			self.add_object(p)
+			Drawing.paintPixel(p.x, p.y, p.color)
 		elif self.current_tool == 'line':
 			self.temp_points.append((bx,by))
 			if len(self.temp_points) == 2:
 				a = Point(*self.temp_points[0])
 				b = Point(*self.temp_points[1])
-				l = Line(a,b)
-				self.add_object('line', l, self.current_color)
+				l = Line(a,b, self.current_color)
+				self.add_object(l)
 				# draw
-				if self.comboClipping.currentText() == 'Cohen-Sutherland':
-					cs = ClippingCS(0, self.canvas.buffer_w-1, 0, self.canvas.buffer_h-1)
-					clipped = cs.clip(a,b)
-					if clipped:
-						if self.comboRender.currentText() == 'DDA':
-							DDA().rasterizeLine(clipped, self.current_color)
-						else:
-							BresenhamLines().rasterizeLine(clipped, self.current_color)
+				if self.comboRender.currentText() == 'DDA':
+					DDA().rasterizeLine(line=l)
 				else:
-					if self.comboRender.currentText() == 'DDA':
-						DDA().rasterizeLine(l, self.current_color)
-					else:
-						BresenhamLines().rasterizeLine(l, self.current_color)
+					BresenhamLines().rasterizeLine(line=l)
 				self.temp_points = []
 		elif self.current_tool == 'circle':
 			self.temp_points.append((bx,by))
@@ -334,12 +259,12 @@ class MainWindow(QtWidgets.QMainWindow):
 				cx, cy = self.temp_points[0]
 				x2, y2 = self.temp_points[1]
 				r = int(((cx-x2)**2 + (cy-y2)**2)**0.5)
-				c = Circle(Point(cx,cy), r)
-				self.add_object('circle', c, self.current_color)
-				BresenhamCircle().rasterize(c, self.current_color)
+				c = Circle(Point(cx,cy), r, self.current_color)
+				self.add_object(c)
+				BresenhamCircle().rasterize(c)
 				self.temp_points = []
 		elif self.current_tool == 'polygon':
-			# append point; expect user to double-click to finish
+			# append point; expect user to return to origin to finish
 			self.temp_points.append((bx,by))
 			if len(self.temp_points) > 1 and (abs(bx - self.temp_points[0][0]) < 3 and abs(by - self.temp_points[0][1]) < 3 and len(self.temp_points) > 2):
 				# close polygon
@@ -348,14 +273,14 @@ class MainWindow(QtWidgets.QMainWindow):
 				for i in range(len(pts)):
 					a = Point(*pts[i])
 					b = Point(*pts[(i+1)%len(pts)])
-					lines.append(Line(a,b))
-				poly = Poligon(lines)
-				self.add_object('polygon', poly, self.current_color)
+					lines.append(Line(a,b, self.current_color))
+				poly = Polygon(lines)
+				self.add_object(poly)
 				for ln in lines:
 					if self.comboRender.currentText() == 'DDA':
-						DDA().rasterizeLine(ln, self.current_color)
+						DDA().rasterizeLine(ln)
 					else:
-						BresenhamLines().rasterizeLine(ln, self.current_color)
+						BresenhamLines().rasterizeLine(ln)
 				self.temp_points = []
 
 	def on_canvas_right_click(self, x, y):
@@ -379,7 +304,7 @@ class MainWindow(QtWidgets.QMainWindow):
 				if not ok: return
 				self.apply_translation(self.selected_index, dx, dy)
 			elif action == t_rotate:
-				ang, ok = QtWidgets.QInputDialog.getDouble(self, 'Rotacionar', 'angulo (graus):', 0.0)
+				ang, ok = QtWidgets.QInputDialog.getDouble(self, 'Rotacionar', 'Ângulo (graus):', 0.0)
 				if not ok: return
 				self.apply_rotation(self.selected_index, ang)
 			elif action == t_scale:
@@ -411,108 +336,105 @@ class MainWindow(QtWidgets.QMainWindow):
 
 	def apply_translation(self, idx, dx, dy):
 		item = self.objects[idx]
-		typ = item['type']
-		if typ == 'point':
-			p = item['obj']
-			p.x += dx; p.y += dy
-		elif typ == 'line':
-			l = item['obj']
-			l.pointA.x += dx; l.pointA.y += dy
-			l.pointB.x += dx; l.pointB.y += dy
-		elif typ == 'circle':
-			c = item['obj']
-			c.center.x += dx; c.center.y += dy
-		elif typ == 'polygon':
-			for ln in item['obj'].Lines:
-				ln.pointA.x += dx; ln.pointA.y += dy
-				ln.pointB.x += dx; ln.pointB.y += dy
+		item = item['obj']
+		if isinstance(item,Point):
+			item.x,item.y = Transformations.translate(item.x, item.y, dx, dy)
+		elif isinstance(item,Line):
+			item.pointA.x,item.pointA.y = Transformations.translate(item.pointA.x,item.pointA.y, dx, dy)
+			item.pointB.x,item.pointB.y = Transformations.translate(item.pointB.x,item.pointB.y, dx, dy)
+		elif isinstance(item,Circle):
+			item.center.x,item.center.y = Transformations.translate(item.center.x, item.center.y, dx, dy)
+		elif isinstance(item,Polygon):
+			for ln in item.lines:
+				ln.pointA.x,ln.pointA.y = Transformations.translate(ln.pointA.x,ln.pointA.y, dx, dy)
+				ln.pointB.x,ln.pointB.y = Transformations.translate(ln.pointB.x,ln.pointB.y, dx, dy)
 		self.redraw_all()
 
+	#TODO: select a point in the object as rotation origin
 	def apply_rotation(self, idx, angle_deg):
 		item = self.objects[idx]
-		# rotate around center
 		rect = self.compute_bounding_rect(item)
+		item = item['obj']
+		
 		if not rect: return
 		cx = rect.x() + rect.width()/2
 		cy = rect.y() + rect.height()/2
-		for (x_ref,y_ref) in []:
-			pass
+
+		#rotate around point (center)
 		def rot_point(px,py):
 			nx = px - cx; ny = py - cy
 			rx, ry = Transformations.rotate(nx, ny, angle_deg)
-			return rx + cx, ry + cy
+			return round(rx + cx + 0.000001), round(ry + cy + 0.000001)
 
-		typ = item['type']
-		if typ == 'point':
-			p = item['obj']
-			p.x, p.y = rot_point(p.x, p.y)
-		elif typ == 'line':
-			l = item['obj']
-			l.pointA.x, l.pointA.y = rot_point(l.pointA.x, l.pointA.y)
-			l.pointB.x, l.pointB.y = rot_point(l.pointB.x, l.pointB.y)
-		elif typ == 'circle':
-			c = item['obj']
-			c.center.x, c.center.y = rot_point(c.center.x, c.center.y)
-		elif typ == 'polygon':
-			for ln in item['obj'].Lines:
+		if isinstance(item,Point):
+			item.x, item.y = rot_point(item.x, item.y)
+		elif isinstance(item,Line):
+			item.pointA.x, item.pointA.y = rot_point(item.pointA.x, item.pointA.y)
+			item.pointB.x, item.pointB.y = rot_point(item.pointB.x, item.pointB.y)
+		elif isinstance(item,Circle):
+			item.center.x, item.center.y = rot_point(item.center.x, item.center.y)
+		elif isinstance(item,Polygon):
+			for ln in item.lines:
 				ln.pointA.x, ln.pointA.y = rot_point(ln.pointA.x, ln.pointA.y)
 				ln.pointB.x, ln.pointB.y = rot_point(ln.pointB.x, ln.pointB.y)
 		self.redraw_all()
 
+	#TODO: select a point in the object as scale origin
 	def apply_scale(self, idx, sx, sy):
 		item = self.objects[idx]
 		rect = self.compute_bounding_rect(item)
 		if not rect: return
 		cx = rect.x() + rect.width()/2
 		cy = rect.y() + rect.height()/2
+
+		#scale around point (center)
 		def sc(px,py):
 			nx = px - cx; ny = py - cy
 			rx, ry = Transformations.scale(nx, ny, sx, sy)
-			return rx + cx, ry + cy
-		typ = item['type']
-		if typ == 'point':
-			p = item['obj']
-			p.x, p.y = sc(p.x, p.y)
-		elif typ == 'line':
-			l = item['obj']
-			l.pointA.x, l.pointA.y = sc(l.pointA.x, l.pointA.y)
-			l.pointB.x, l.pointB.y = sc(l.pointB.x, l.pointB.y)
-		elif typ == 'circle':
-			c = item['obj']
-			c.center.x, c.center.y = sc(c.center.x, c.center.y)
-			c.radius = int(c.radius * (sx+sy)/2)
-		elif typ == 'polygon':
-			for ln in item['obj'].Lines:
+			return round(rx + cx + 0.000001), round(ry + cy + 0.000001)
+		
+		obj = item['obj']
+		if isinstance(obj,Point):
+			obj.x, obj.y = sc(obj.x, obj.y)
+		elif isinstance(obj,Line):
+			obj.pointA.x, obj.pointA.y = sc(obj.pointA.x, obj.pointA.y)
+			obj.pointB.x, obj.pointB.y = sc(obj.pointB.x, obj.pointB.y)
+			print("bosta")
+		elif isinstance(obj,Circle):
+			obj.center.x, obj.center.y = sc(obj.center.x, obj.center.y)
+			obj.radius = int(obj.radius * (sx+sy)/2)
+		elif isinstance(obj,Polygon):
+			for ln in obj.lines:
 				ln.pointA.x, ln.pointA.y = sc(ln.pointA.x, ln.pointA.y)
 				ln.pointB.x, ln.pointB.y = sc(ln.pointB.x, ln.pointB.y)
 		self.redraw_all()
 
+	#TODO: select a point in the object as reflect origin
 	def apply_reflect(self, idx, axis):
 		item = self.objects[idx]
-		typ = item['type']
-		# reflect around center
 		rect = self.compute_bounding_rect(item)
 		if not rect: return
 		cx = rect.x() + rect.width()/2
 		cy = rect.y() + rect.height()/2
-		def rf(px,py):
+		item = item['obj']
+
+		#reflect around point (center)
+		def rft(px, py, axis):
 			nx = px - cx; ny = py - cy
 			rx, ry = Transformations.reflect(nx, ny, axis)
-			return rx + cx, ry + cy
-		if typ == 'point':
-			p = item['obj']
-			p.x, p.y = rf(p.x, p.y)
-		elif typ == 'line':
-			l = item['obj']
-			l.pointA.x, l.pointA.y = rf(l.pointA.x, l.pointA.y)
-			l.pointB.x, l.pointB.y = rf(l.pointB.x, l.pointB.y)
-		elif typ == 'circle':
-			c = item['obj']
-			c.center.x, c.center.y = rf(c.center.x, c.center.y)
-		elif typ == 'polygon':
-			for ln in item['obj'].Lines:
-				ln.pointA.x, ln.pointA.y = rf(ln.pointA.x, ln.pointA.y)
-				ln.pointB.x, ln.pointB.y = rf(ln.pointB.x, ln.pointB.y)
+			return round(rx + cx + 0.000001), round(ry + cy + 0.000001)
+
+		if isinstance(item,Point):
+			item.x,item.y = rft(item.x, item.y, axis=axis)
+		elif isinstance(item,Line):
+			item.pointA.x,item.pointA.y = rft(item.pointA.x,item.pointA.y, axis=axis)
+			item.pointB.x,item.pointB.y = rft(item.pointB.x,item.pointB.y, axis=axis)
+		elif isinstance(item,Circle):
+			item.center.x,item.center.y = rft(item.center.x, item.center.y,axis=axis)
+		elif isinstance(item,Polygon):
+			for ln in item.lines:
+				ln.pointA.x,item.pointA.y = rft(ln.pointA.x,ln.pointA.y,axis=axis)
+				ln.pointB.x,item.pointB.y = rft(ln.pointB.x,ln.pointB.y,axis=axis)
 		self.redraw_all()
 
 
