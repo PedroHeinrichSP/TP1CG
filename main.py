@@ -61,17 +61,14 @@ class CanvasWidget(QtWidgets.QWidget):
 			painter.setPen(pen)
 			rect = QtCore.QRect(self.drag_select_start, self.drag_select_end).normalized()
 			painter.drawRect(rect)
-		sel = self.controller.selected_index
-		if sel is not None and 0 <= sel < len(self.controller.objects):
-			obj = self.controller.objects[sel]
-			rect_buf = self.controller.compute_bounding_rect_buf(obj)
-			if rect_buf:
-				rect_widget = self.buffer_rect_to_widget(rect_buf)
-				pen = QtGui.QPen(QtGui.QColor('purple'))
-				pen.setStyle(QtCore.Qt.PenStyle.DashLine)
-				pen.setWidth(2)
-				painter.setPen(pen)
-				painter.drawRect(rect_widget)
+		rect_buf = self.controller.get_selected_rect_buf()
+		if rect_buf:
+			rect_widget = self.buffer_rect_to_widget(rect_buf)
+			pen = QtGui.QPen(QtGui.QColor('purple'))
+			pen.setStyle(QtCore.Qt.PenStyle.DashLine)
+			pen.setWidth(2)
+			painter.setPen(pen)
+			painter.drawRect(rect_widget)
 
 		# draw pivot marker (cross) at selected pivot pixel
 		if self.pivot_point is not None:
@@ -204,6 +201,7 @@ class MainWindow(QtWidgets.QMainWindow):
 		# tree root and views
 		self.views = []  # list of dicts: {'name': str, 'rect': QRect, 'objects': list}
 		self.active_view = None
+		self.selected_view_obj_index = None
 		self.treeObjects.clear()
 		root = QtWidgets.QTreeWidgetItem(["Canvas"])
 		root.setData(0, QtCore.Qt.ItemDataRole.UserRole, {'type': 'root'})
@@ -309,13 +307,31 @@ class MainWindow(QtWidgets.QMainWindow):
 		if data['type'] == 'root':
 			self.active_view = None
 			self.selected_index = None
+			self.selected_view_obj_index = None
 		elif data['type'] == 'view':
 			self.active_view = data['ref']
+			self.selected_index = None
+			self.selected_view_obj_index = None
+		elif data['type'] == 'view-object':
+			# select an object inside the active view
+			self.active_view = data['view']
+			self.selected_view_obj_index = data['index']
 			self.selected_index = None
 		elif data['type'] == 'object':
 			self.selected_index = data['index']
 			self.active_view = None
+			self.selected_view_obj_index = None
 		self.redraw_all()
+
+	def get_selected_rect_buf(self):
+		# Determine bbox for selected item (root or view)
+		if self.selected_index is not None:
+			return self.compute_bounding_rect(self.objects[self.selected_index])
+		if self.active_view and self.selected_view_obj_index is not None:
+			obj = self.active_view['objects'][self.selected_view_obj_index]
+			# wrap minimal dict to reuse compute_bounding_rect
+			return self.compute_bounding_rect({'obj': obj})
+		return None
 
 	def compute_bounding_rect(self, item):
 		item = item['obj'] 
@@ -402,40 +418,81 @@ class MainWindow(QtWidgets.QMainWindow):
 			# keep current selection/tool otherwise
 
 	def on_canvas_right_click(self, x, y):
-		# if click inside selected object's bbox, show transform menu
-		if self.selected_index is None: return
-		item = self.objects[self.selected_index]
-		# map widget click to buffer coords
+		# Show context menu for either a root object or a viewport object under/right-click
 		bx, by = self.canvas.widget_to_buffer(x, y)
-		rect = self.compute_bounding_rect(item)
-		if rect and rect.contains(bx,by):
-			menu = QtWidgets.QMenu(self)
-			t_translate = menu.addAction('Transladar')
-			t_rotate = menu.addAction('Rotacionar')
-			t_scale = menu.addAction('Escalar')
-			t_reflect = menu.addAction('Refletir')
-			action = menu.exec(QtGui.QCursor.pos())
-			if action == t_translate:
-				dx, ok = QtWidgets.QInputDialog.getInt(self, 'Transladar', 'dx:', 0)
-				if not ok: return
-				dy, ok = QtWidgets.QInputDialog.getInt(self, 'Transladar', 'dy:', 0)
-				if not ok: return
-				self.apply_translation(self.selected_index, dx, dy)
-			elif action == t_rotate:
-				ang, ok = QtWidgets.QInputDialog.getDouble(self, 'Rotacionar', 'Ângulo (graus):', 0.0)
-				if not ok: return
-				self.apply_rotation(self.selected_index, ang)
-			elif action == t_scale:
-				sx, ok = QtWidgets.QInputDialog.getDouble(self, 'Escalar', 'scaleX:', 1.0)
-				if not ok: return
-				sy, ok = QtWidgets.QInputDialog.getDouble(self, 'Escalar', 'scaleY:', 1.0)
-				if not ok: return
-				self.apply_scale(self.selected_index, sx, sy)
-			elif action == t_reflect:
-				items = ['x','y','yx']
-				txt, ok = QtWidgets.QInputDialog.getItem(self, 'Refletir', 'axis:', items, 0, False)
-				if not ok: return
-				self.apply_reflect(self.selected_index, txt)
+		# Determine target: prefer current selection; if none, try simple hit-test
+		target_kind = None
+		target_index = None
+		item_wrapper = None
+		# 1) If a view object is selected
+		if self.active_view and self.selected_view_obj_index is not None:
+			obj = self.active_view['objects'][self.selected_view_obj_index]
+			item_wrapper = {'obj': obj}
+			rect = self.compute_bounding_rect(item_wrapper)
+			if rect and rect.contains(bx, by):
+				target_kind = 'view'
+				target_index = self.selected_view_obj_index
+		# 2) Else if a root object is selected
+		elif self.selected_index is not None:
+			item_wrapper = self.objects[self.selected_index]
+			rect = self.compute_bounding_rect(item_wrapper)
+			if rect and rect.contains(bx, by):
+				target_kind = 'root'
+				target_index = self.selected_index
+		# 3) Else try hit-test on active view objects (if any)
+		elif self.active_view:
+			for i, vo in enumerate(self.active_view['objects']):
+				wrap = {'obj': vo}
+				rect = self.compute_bounding_rect(wrap)
+				if rect and rect.contains(bx, by):
+					self.selected_view_obj_index = i
+					item_wrapper = wrap
+					target_kind = 'view'
+					target_index = i
+					break
+		# 4) Else hit-test root objects
+		else:
+			for i, it in enumerate(self.objects):
+				rect = self.compute_bounding_rect(it)
+				if rect and rect.contains(bx, by):
+					self.selected_index = i
+					item_wrapper = it
+					target_kind = 'root'
+					target_index = i
+					break
+
+		if target_kind is None or item_wrapper is None:
+			return
+
+		# Build and show the context menu
+		menu = QtWidgets.QMenu(self)
+		t_translate = menu.addAction('Transladar')
+		t_rotate = menu.addAction('Rotacionar')
+		t_scale = menu.addAction('Escalar')
+		t_reflect = menu.addAction('Refletir')
+		action = menu.exec(QtGui.QCursor.pos())
+		if action == t_translate:
+			dx, ok = QtWidgets.QInputDialog.getInt(self, 'Transladar', 'dx:', 0)
+			if not ok: return
+			dy, ok = QtWidgets.QInputDialog.getInt(self, 'Transladar', 'dy:', 0)
+			if not ok: return
+			# For view objects, pass idx=None to route correctly
+			self.apply_translation(target_index if target_kind == 'root' else None, dx, dy)
+		elif action == t_rotate:
+			ang, ok = QtWidgets.QInputDialog.getDouble(self, 'Rotacionar', 'Ângulo (graus):', 0.0)
+			if not ok: return
+			self.apply_rotation(target_index if target_kind == 'root' else None, ang)
+		elif action == t_scale:
+			sx, ok = QtWidgets.QInputDialog.getDouble(self, 'Escalar', 'scaleX:', 1.0)
+			if not ok: return
+			sy, ok = QtWidgets.QInputDialog.getDouble(self, 'Escalar', 'scaleY:', 1.0)
+			if not ok: return
+			self.apply_scale(target_index if target_kind == 'root' else None, sx, sy)
+		elif action == t_reflect:
+			items = ['x','y','yx']
+			txt, ok = QtWidgets.QInputDialog.getItem(self, 'Refletir', 'axis:', items, 0, False)
+			if not ok: return
+			self.apply_reflect(target_index if target_kind == 'root' else None, txt)
 
 	def on_canvas_move(self, x, y):
 		if QtWidgets.QApplication.mouseButtons() & QtCore.Qt.MouseButton.LeftButton:
@@ -491,6 +548,12 @@ class MainWindow(QtWidgets.QMainWindow):
 		node = QtWidgets.QTreeWidgetItem([name])
 		node.setData(0, QtCore.Qt.ItemDataRole.UserRole, {'type': 'view', 'ref': view})
 		self.tree_root.addChild(node)
+		# add children for view objects
+		for i, vo in enumerate(view_objects):
+			label = vo.__class__.__name__ + f" #{i}"
+			child = QtWidgets.QTreeWidgetItem([label])
+			child.setData(0, QtCore.Qt.ItemDataRole.UserRole, {'type': 'view-object', 'view': view, 'index': i})
+			node.addChild(child)
 		self.treeObjects.expandItem(node)
 		# activate view
 		self.active_view = view
@@ -498,8 +561,13 @@ class MainWindow(QtWidgets.QMainWindow):
 		self.redraw_all()
 
 	def apply_translation(self, idx, dx, dy):
-		item = self.objects[idx]
-		item = item['obj']
+		# If a view object is selected, transform it; else transform root object
+		if self.active_view and self.selected_view_obj_index is not None and idx is None:
+			obj = self.active_view['objects'][self.selected_view_obj_index]
+			target = {'obj': obj}
+		else:
+			target = self.objects[idx]
+		item = target['obj']
 		if isinstance(item,Point):
 			item.x,item.y = Transformations.translate(item.x, item.y, dx, dy)
 		elif isinstance(item,Line):
@@ -514,7 +582,11 @@ class MainWindow(QtWidgets.QMainWindow):
 		self.redraw_all()
 
 	def apply_rotation(self, idx, angle_deg):
-		item = self.objects[idx]
+		if self.active_view and self.selected_view_obj_index is not None and idx is None:
+			target = {'obj': self.active_view['objects'][self.selected_view_obj_index]}
+		else:
+			target = self.objects[idx]
+		item = target
 		rect = self.compute_bounding_rect(item)
 		item = item['obj']
 		
@@ -546,7 +618,11 @@ class MainWindow(QtWidgets.QMainWindow):
 		self.redraw_all()
 
 	def apply_scale(self, idx, sx, sy):
-		item = self.objects[idx]
+		if self.active_view and self.selected_view_obj_index is not None and idx is None:
+			target = {'obj': self.active_view['objects'][self.selected_view_obj_index]}
+		else:
+			target = self.objects[idx]
+		item = target
 		rect = self.compute_bounding_rect(item)
 		if not rect: return
 		# use pivot if set; else center of bbox
@@ -580,7 +656,11 @@ class MainWindow(QtWidgets.QMainWindow):
 
 	#TODO: select a point in the object as reflect origin
 	def apply_reflect(self, idx, axis):
-		item = self.objects[idx]
+		if self.active_view and self.selected_view_obj_index is not None and idx is None:
+			target = {'obj': self.active_view['objects'][self.selected_view_obj_index]}
+		else:
+			target = self.objects[idx]
+		item = target
 		rect = self.compute_bounding_rect(item)
 		if not rect: return
 		# use pivot if set; else center of bbox
