@@ -28,6 +28,8 @@ class CanvasWidget(QtWidgets.QWidget):
 		self.drag_select_end = None
 		# grid overlay flag
 		self.show_grid = True
+		# pivot (buffer coords) for transforms
+		self.pivot_point = None
 
 	# Pinta a bounding box
 	def paintEvent(self, event):
@@ -72,6 +74,24 @@ class CanvasWidget(QtWidgets.QWidget):
 				painter.setPen(pen)
 				painter.drawRect(rect_widget)
 
+		# draw pivot marker (cross) at selected pivot pixel
+		if self.pivot_point is not None:
+			bx, by = self.pivot_point
+			sx = self.width() / max(1, self.buffer_w)
+			sy = self.height() / max(1, self.buffer_h)
+			# Align to the rounded pixel rectangle to match grid lines
+			x0 = int(round(bx * sx))
+			x1 = int(round((bx + 1) * sx)) - 1
+			y0 = int(round(by * sy))
+			y1 = int(round((by + 1) * sy)) - 1
+			cx = (x0 + x1) // 2
+			cy = (y0 + y1) // 2
+			pen = QtGui.QPen(QtGui.QColor(220, 50, 50))
+			pen.setWidth(2)
+			painter.setPen(pen)
+			painter.drawLine(cx-6, cy, cx+6, cy)
+			painter.drawLine(cx, cy-6, cx, cy+6)
+
 	# TODO: Corrigir logica
 	def drawGrid(self, show: bool = True):
 		# Toggle grid overlay (drawn in paintEvent between pixels)
@@ -115,6 +135,14 @@ class CanvasWidget(QtWidgets.QWidget):
 
 	def set_clip_rect(self, rect_buf: QtCore.QRect | None):
 		self.clip_rect = rect_buf
+		self.update()
+
+	def set_pivot(self, bx=None, by=None):
+		"""Set pivot in buffer coords; pass None to clear."""
+		if bx is None or by is None:
+			self.pivot_point = None
+		else:
+			self.pivot_point = (int(bx), int(by))
 		self.update()
 
 	def mousePressEvent(self, event):
@@ -164,6 +192,9 @@ class MainWindow(QtWidgets.QMainWindow):
 		self.btnNew.clicked.connect(self.action_new)
 		# new: clipping tool and tree selection
 		self.toolClipBtn.clicked.connect(lambda: self.set_tool('clip'))
+		# pivot selection tool
+		if hasattr(self, 'toolPivotBtn'):
+			self.toolPivotBtn.clicked.connect(lambda: self.set_tool('pivot'))
 		self.treeObjects.itemSelectionChanged.connect(self.on_tree_selection)
 		# grid checkbox
 		if hasattr(self, 'showGridCheck'):
@@ -229,6 +260,8 @@ class MainWindow(QtWidgets.QMainWindow):
 		self.treeObjects.expandItem(root)
 		self.selected_index = None
 		self.canvas.drawGrid()
+		# reset pivot
+		self.canvas.set_pivot(None, None)
 
 
 
@@ -368,6 +401,10 @@ class MainWindow(QtWidgets.QMainWindow):
 			self.canvas.drag_select_start = QtCore.QPoint(x, y)
 			self.canvas.drag_select_end = QtCore.QPoint(x, y)
 			self.canvas.update()
+		elif self.current_tool == 'pivot':
+			# set pivot to clicked buffer pixel
+			self.canvas.set_pivot(bx, by)
+			# keep current selection/tool otherwise
 
 	def on_canvas_right_click(self, x, y):
 		# if click inside selected object's bbox, show transform menu
@@ -488,8 +525,12 @@ class MainWindow(QtWidgets.QMainWindow):
 		item = item['obj']
 		
 		if not rect: return
-		cx = rect.x() + rect.width()/2
-		cy = rect.y() + rect.height()/2
+		# use pivot if set; else center of bbox
+		if self.canvas.pivot_point is not None:
+			cx, cy = self.canvas.pivot_point
+		else:
+			cx = rect.x() + rect.width()/2
+			cy = rect.y() + rect.height()/2
 
 		#rotate around point (center)
 		def rot_point(px,py):
@@ -515,8 +556,12 @@ class MainWindow(QtWidgets.QMainWindow):
 		item = self.objects[idx]
 		rect = self.compute_bounding_rect(item)
 		if not rect: return
-		cx = rect.x() + rect.width()/2
-		cy = rect.y() + rect.height()/2
+		# use pivot if set; else center of bbox
+		if self.canvas.pivot_point is not None:
+			cx, cy = self.canvas.pivot_point
+		else:
+			cx = rect.x() + rect.width()/2
+			cy = rect.y() + rect.height()/2
 
 		#scale around point (center)
 		def sc(px,py):
@@ -545,8 +590,12 @@ class MainWindow(QtWidgets.QMainWindow):
 		item = self.objects[idx]
 		rect = self.compute_bounding_rect(item)
 		if not rect: return
-		cx = rect.x() + rect.width()/2
-		cy = rect.y() + rect.height()/2
+		# use pivot if set; else center of bbox
+		if self.canvas.pivot_point is not None:
+			cx, cy = self.canvas.pivot_point
+		else:
+			cx = rect.x() + rect.width()/2
+			cy = rect.y() + rect.height()/2
 		item = item['obj']
 
 		#reflect around point (center)

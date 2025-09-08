@@ -73,6 +73,11 @@
      </widget>
     </item>
   <item>
+   <widget class="QToolButton" name="toolPivotBtn">
+    <property name="text"><string>Pivô</string></property>
+   </widget>
+  </item>
+  <item>
    <widget class="QComboBox" name="comboClipping">
     <item>
      <property name="text"><string>Cohen-Sutherland</string></property>
