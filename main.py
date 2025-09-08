@@ -182,6 +182,9 @@ class MainWindow(QtWidgets.QMainWindow):
 		self.treeObjects.addTopLevelItem(root)
 		self.tree_root = root
 		self.treeObjects.expandItem(root)
+		# ensure a clipping algorithm is selected by default
+		if hasattr(self, 'comboClipping') and self.comboClipping.count() > 0:
+			self.comboClipping.setCurrentIndex(0)
 
 	def resource_path(self, relative_path: str) -> str:
 		# Helper to get path to resources for PyInstaller and dev
@@ -424,49 +427,31 @@ class MainWindow(QtWidgets.QMainWindow):
 		# Build a view containing clipped objects according to selected algorithm
 		algo = self.comboClipping.currentText()
 		view_objects = []
-		if algo not in ('Cohen-Sutherland', 'Liang-Barsky'):
-			# no specific clipping: include objects that intersect rect (bbox tests)
-			for it in self.objects:
-				obj = it['obj']
-				if isinstance(obj, Point):
-					if rect_buf.contains(int(obj.x), int(obj.y)):
-						view_objects.append(Point(obj.x, obj.y, obj.color))
-				elif isinstance(obj, Line):
-					view_objects.append(Line(Point(obj.pointA.x, obj.pointA.y), Point(obj.pointB.x, obj.pointB.y), obj.color))
-				elif isinstance(obj, Circle):
+		for it in self.objects:
+			obj = it['obj']
+			clipper = ClippingCS(rect_buf.left(), rect_buf.right(), rect_buf.top(), rect_buf.bottom()) if algo == 'Cohen-Sutherland' else ClippingLB(rect_buf.left(), rect_buf.right(), rect_buf.top(), rect_buf.bottom())
+			if isinstance(obj, Point):
+				if rect_buf.contains(int(obj.x), int(obj.y)):
+					view_objects.append(Point(obj.x, obj.y, obj.color))
+			elif isinstance(obj, Line):
+				cl = clipper.clip_line(obj)
+				if cl is not None:
+					view_objects.append(Line(cl.pointA, cl.pointB, obj.color))
+			elif isinstance(obj, Circle):
+				# simple include if bbox intersects
+				xs = [obj.center.x - obj.radius, obj.center.x + obj.radius]
+				ys = [obj.center.y - obj.radius, obj.center.y + obj.radius]
+				cb = QtCore.QRect(min(xs), min(ys), abs(xs[1]-xs[0])+1, abs(ys[1]-ys[0])+1)
+				if rect_buf.intersects(cb):
 					view_objects.append(Circle(Point(obj.center.x, obj.center.y), obj.radius, obj.color))
-				elif isinstance(obj, Polygon):
-					lines = [Line(Point(ln.pointA.x, ln.pointA.y), Point(ln.pointB.x, ln.pointB.y), ln.color) for ln in obj.lines]
-					view_objects.append(Polygon(lines))
-		else:
-			for it in self.objects:
-				obj = it['obj']
-				if algo == 'Cohen-Sutherland':
-					clipper = ClippingCS(rect_buf.left(), rect_buf.right(), rect_buf.top(), rect_buf.bottom())
-				else:
-					clipper = ClippingLB(rect_buf.left(), rect_buf.right(), rect_buf.top(), rect_buf.bottom())
-				if isinstance(obj, Point):
-					if rect_buf.contains(int(obj.x), int(obj.y)):
-						view_objects.append(Point(obj.x, obj.y, obj.color))
-				elif isinstance(obj, Line):
-					cl = clipper.clip_line(obj)
+			elif isinstance(obj, Polygon):
+				clipped_lines = []
+				for ln in obj.lines:
+					cl = clipper.clip_line(ln)
 					if cl is not None:
-						view_objects.append(Line(cl.pointA, cl.pointB, obj.color))
-				elif isinstance(obj, Circle):
-					# simple include if bbox intersects
-					xs = [obj.center.x - obj.radius, obj.center.x + obj.radius]
-					ys = [obj.center.y - obj.radius, obj.center.y + obj.radius]
-					cb = QtCore.QRect(min(xs), min(ys), abs(xs[1]-xs[0])+1, abs(ys[1]-ys[0])+1)
-					if rect_buf.intersects(cb):
-						view_objects.append(Circle(Point(obj.center.x, obj.center.y), obj.radius, obj.color))
-				elif isinstance(obj, Polygon):
-					clipped_lines = []
-					for ln in obj.lines:
-						cl = clipper.clip_line(ln)
-						if cl is not None:
-							clipped_lines.append(Line(cl.pointA, cl.pointB, ln.color))
-					if clipped_lines:
-						view_objects.append(Polygon(clipped_lines))
+						clipped_lines.append(Line(cl.pointA, cl.pointB, ln.color))
+				if clipped_lines:
+					view_objects.append(Polygon(clipped_lines))
 		# register view in tree
 		name = f"Viewport {len(self.views)+1}"
 		view = {'name': name, 'rect': rect_buf, 'objects': view_objects}

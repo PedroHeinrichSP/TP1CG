@@ -72,19 +72,16 @@
       <property name="text"><string>Recorte</string></property>
      </widget>
     </item>
-      <item>
-       <widget class="QComboBox" name="comboClipping">
-        <item>
-         <property name="text"><string>None</string></property>
-        </item>
-        <item>
-         <property name="text"><string>Cohen-Sutherland</string></property>
-        </item>
-        <item>
-         <property name="text"><string>Liang-Barsky</string></property>
-        </item>
-       </widget>
-      </item>
+  <item>
+   <widget class="QComboBox" name="comboClipping">
+    <item>
+     <property name="text"><string>Cohen-Sutherland</string></property>
+    </item>
+    <item>
+     <property name="text"><string>Liang-Barsky</string></property>
+    </item>
+   </widget>
+  </item>
       <item>
        <widget class="QToolButton" name="btnNew">
         <property name="text"><string>Novo</string></property>
