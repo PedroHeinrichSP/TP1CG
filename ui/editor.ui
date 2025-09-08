@@ -62,11 +62,16 @@
         <property name="text"><string>Círculo</string></property>
        </widget>
       </item>
-      <item>
-       <widget class="QToolButton" name="toolPolyBtn">
-        <property name="text"><string>Polígono</string></property>
-       </widget>
-      </item>
+    <item>
+     <widget class="QToolButton" name="toolPolyBtn">
+      <property name="text"><string>Polígono</string></property>
+     </widget>
+    </item>
+    <item>
+     <widget class="QToolButton" name="toolClipBtn">
+      <property name="text"><string>Recorte</string></property>
+     </widget>
+    </item>
       <item>
        <widget class="QComboBox" name="comboClipping">
         <item>
@@ -85,6 +90,13 @@
         <property name="text"><string>Novo</string></property>
        </widget>
       </item>
+  <item>
+   <widget class="QCheckBox" name="showGridCheck">
+    <property name="text"><string>Grid</string></property>
+    <property name="checked"><bool>true</bool></property>
+   </widget>
+  </item>
+      
      </layout>
     </item>
     <item>
@@ -102,13 +114,18 @@
         </property>
        </widget>
       </item>
-      <item>
-       <widget class="QListWidget" name="listObjects">
-        <property name="minimumWidth">
-         <number>200</number>
-        </property>
-       </widget>
-      </item>
+    <item>
+     <widget class="QTreeWidget" name="treeObjects">
+      <property name="minimumWidth">
+       <number>240</number>
+      </property>
+      <column>
+       <property name="text">
+        <string>Objetos</string>
+       </property>
+      </column>
+     </widget>
+    </item>
      </layout>
     </item>
    </layout>

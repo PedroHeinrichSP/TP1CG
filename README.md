@@ -37,6 +37,53 @@ pip install -r requirements.txt
 python main.py
 ```
 
+## Empacotar (Windows, Linux x86_64 e macOS)
+
+Usamos PyInstaller. Instale-o no ambiente atual:
+
+```
+pip install pyinstaller
+```
+
+Importante: empacote nativamente no sistema-alvo. Ou seja, gere o .exe no Windows, o binário no Linux x86_64 e o .app/.bin no macOS rodando o comando em cada OS (PyInstaller não faz cross-compile real entre plataformas).
+
+O projeto carrega o arquivo de UI via `resource_path()` (suporta PyInstaller). Lembre-se de incluir `ui/editor.ui` com `--add-data`.
+
+- Windows (gera TP1CG.exe):
+
+```
+pyinstaller --noconfirm \
+	--onefile --windowed \
+	--name TP1CG \
+	--add-data "ui\\editor.ui;ui" \
+	main.py
+```
+
+- Linux x86_64 (gera dist/TP1CG):
+
+```
+pyinstaller --noconfirm \
+	--onefile --windowed \
+	--name TP1CG \
+	--add-data "ui/editor.ui:ui" \
+	main.py
+```
+
+- macOS (gera .app e binário em dist/TP1CG):
+
+```
+pyinstaller --noconfirm \
+	--onefile --windowed \
+	--name TP1CG \
+	--add-data "ui/editor.ui:ui" \
+	main.py
+```
+
+Dicas:
+- Se faltar algum plugin do Qt (ex.: platforms), o hook do PyInstaller para PyQt6 normalmente resolve automaticamente. Certifique-se de estar com PyInstaller atualizado.
+- Para incluir imagens adicionais (ex.: `silksong3.png`, `tela.png`) use mais `--add-data` no mesmo formato.
+- Para debug, remova `--windowed` e rode o executável no terminal para ver logs.
+
 Notas de uso e limitações
 - Ao desenhar uma linha: selecione a ferramenta "Reta" e clique em dois pontos.
 - Ao desenhar um círculo: clique no centro e em um ponto na circunferência para definir o raio.

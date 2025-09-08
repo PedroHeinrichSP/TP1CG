@@ -145,8 +145,7 @@ class ClippingCS:
         self.yMin = yMin
         self.yMax = yMax
 
-    @staticmethod
-    def getCode(self, x, y):
+    def _get_code(self, x, y):
         code = 0
         if x < self.xMin: code |= 1     # bit 0: esquerda
         if x > self.xMax: code |= 2     # bit 1: direita
@@ -154,20 +153,15 @@ class ClippingCS:
         if y > self.yMax: code |= 8     # bit 3: acima
         return code
 
-    @staticmethod
-    def clip(self, pointA, pointB = None):
+    def clip_line(self, line: Line) -> Line | None:
+        pointA = Point(line.pointA.x, line.pointA.y)
+        pointB = Point(line.pointB.x, line.pointB.y)
         accept = False
         done = False
 
-        if pointB is None: # Se não for linha
-            codePoint = self.getCode(pointA.x, pointA.y)
-            if codePoint == 0:
-                accept = True
-                return Point(pointA.x, pointA.y)
-        
         while not done:
-            codeA = self.getCode(pointA.x, pointA.y)
-            codeB = self.getCode(pointB.x, pointB.y)
+            codeA = self._get_code(pointA.x, pointA.y)
+            codeB = self._get_code(pointB.x, pointB.y)
 
             if codeA == 0 and codeB == 0:
                 accept = True
@@ -182,64 +176,77 @@ class ClippingCS:
                     cOut = codeB
                     x, y = pointB.x, pointB.y
 
-                if cOut & 1:  # bit 0: esquerda
+                if cOut & 1:
                     xInt = self.xMin
                     yInt = y + (pointB.y - pointA.y) * ((self.xMin - x) / (pointB.x - pointA.x))
-                elif cOut & 2:  # bit 1: direita
+                elif cOut & 2:
                     xInt = self.xMax
                     yInt = y + (pointB.y - pointA.y) * ((self.xMax - x) / (pointB.x - pointA.x))
-                elif cOut & 4:  # bit 2: abaixo
+                elif cOut & 4:
                     yInt = self.yMin
                     xInt = x + (pointB.x - pointA.x) * ((self.yMin - y) / (pointB.y - pointA.y))
-                elif cOut & 8:  # bit 3: acima
+                else:  # cOut & 8
                     yInt = self.yMax
                     xInt = x + (pointB.x - pointA.x) * ((self.yMax - y) / (pointB.y - pointA.y))
 
                 if cOut == codeA:
-                    pointA.x, pointA.y = xInt, yInt
+                    pointA.x, pointA.y = round(xInt + 0.000001), round(yInt + 0.000001)
                 else:
-                    pointB.x, pointB.y = xInt, yInt
+                    pointB.x, pointB.y = round(xInt + 0.000001), round(yInt + 0.000001)
 
         if accept:
-            return Line(Point(pointA.x, pointA.y), Point(pointB.x, pointB.y)) #Retorna pra desenhar (maybe)
+            return Line(Point(pointA.x, pointA.y), Point(pointB.x, pointB.y), getattr(line, 'color', None))
+        return None
 
 # Recorte Liang-Barsky
 class ClippingLB:
-    def __init__(self):
-        pass
+    def __init__(self, xMin, xMax, yMin, yMax):
+        self.xMin = xMin
+        self.xMax = xMax
+        self.yMin = yMin
+        self.yMax = yMax
 
     @staticmethod
-    def clipTest(self, p, q, uA, uB):
-        r = 0.0
+    def _clipTest(p, q, uA, uB):
         result = True
         if p < 0:
-            r = q/p
-            if r > uB: result = False
-            elif r > uA: uA=r
+            r = q / p
+            if r > uB:
+                result = False
+            elif r > uA:
+                uA = r
         elif p > 0:
-            r = q/p
-            if r < uA: result = False
-            elif r < uB: uB = r
-        elif q < 0: result = False
+            r = q / p
+            if r < uA:
+                result = False
+            elif r < uB:
+                uB = r
+        elif q < 0:
+            result = False
         return result, uA, uB
-    
-    def clip(self, xA, xB, yA, yB, xMin, xMax, yMin, yMax):
-        uA, uB = 0, 1
-        deltaX, deltaY = xB-xA, yB-yA
-        esq, uA, uB = self.clipTest(-deltaX, xA - xMin, uA, uB)
-        if esq:
-            dir, uA, uB = self.clipTest(deltaX, xMax - xA, uA, uB)
-            if dir:
-                inf, uA, uB = self.clipTest(-deltaY, yA - yMin, uA, uB)
-                if inf:
-                    sup, uA, uB = self.clipTest(deltaY, yMax - yA, uA, uB)
-                    if sup:
-                        if uB < 1:
+
+    def clip_line(self, line: Line) -> Line | None:
+        xA, yA = line.pointA.x, line.pointA.y
+        xB, yB = line.pointB.x, line.pointB.y
+        uA, uB = 0.0, 1.0
+        deltaX, deltaY = xB - xA, yB - yA
+        ok, uA, uB = self._clipTest(-deltaX, xA - self.xMin, uA, uB)
+        if ok:
+            ok, uA, uB = self._clipTest(deltaX, self.xMax - xA, uA, uB)
+            if ok:
+                ok, uA, uB = self._clipTest(-deltaY, yA - self.yMin, uA, uB)
+                if ok:
+                    ok, uA, uB = self._clipTest(deltaY, self.yMax - yA, uA, uB)
+                    if ok:
+                        if uB < 1.0:
                             xB = xA + deltaX * uB
                             yB = yA + deltaY * uB
-                        if uA > 0:
+                        if uA > 0.0:
                             xA = xA + deltaX * uA
                             yA = yA + deltaY * uA
-                        return Line(Point(round(xA + 0.000001) , round(yA + 0.000001)), Point(round(xB + 0.000001), round(yB + 0.000001)))                    
+                        return Line(Point(round(xA + 0.000001), round(yA + 0.000001)),
+                                    Point(round(xB + 0.000001), round(yB + 0.000001)),
+                                    getattr(line, 'color', None))
+        return None
 
 

@@ -21,12 +21,45 @@ class CanvasWidget(QtWidgets.QWidget):
 		self.dragging = False
 		self.drag_start = None
 		self.setFocusPolicy(QtCore.Qt.FocusPolicy.ClickFocus)
+		# logical clip rect in buffer coords (limits pixel writes when active view selected)
+		self.clip_rect = None
+		# optional overlay selection rect in widget coords (for clipping drag)
+		self.drag_select_start = None
+		self.drag_select_end = None
+		# grid overlay flag
+		self.show_grid = True
 
 	# Pinta a bounding box
 	def paintEvent(self, event):
 		painter = QtGui.QPainter(self)
 		scaled = self.buffer.scaled(self.width(), self.height(), QtCore.Qt.AspectRatioMode.IgnoreAspectRatio, QtCore.Qt.TransformationMode.FastTransformation)
 		painter.drawImage(0, 0, scaled)
+		# draw grid overlay between pixels for better counting/visualization
+		if self.show_grid and self.buffer_w > 0 and self.buffer_h > 0:
+			pen = QtGui.QPen(QtGui.QColor(180, 180, 180, 160))
+			pen.setCosmetic(True)
+			pen.setWidth(1)
+			painter.setPen(pen)
+			cell_w = self.width() / self.buffer_w
+			cell_h = self.height() / self.buffer_h
+			# vertical lines
+			for i in range(1, self.buffer_w):
+				x = round(i * cell_w)
+				painter.drawLine(x, 0, x, self.height())
+			# horizontal lines
+			for j in range(1, self.buffer_h):
+				y = round(j * cell_h)
+				painter.drawLine(0, y, self.width(), y)
+			# outer border
+			painter.drawRect(0, 0, self.width()-1, self.height()-1)
+		# draw overlay drag rectangle if present (widget coords)
+		if self.drag_select_start and self.drag_select_end:
+			pen = QtGui.QPen(QtGui.QColor(0, 180, 255))
+			pen.setStyle(QtCore.Qt.PenStyle.DashLine)
+			pen.setWidth(2)
+			painter.setPen(pen)
+			rect = QtCore.QRect(self.drag_select_start, self.drag_select_end).normalized()
+			painter.drawRect(rect)
 		sel = self.controller.selected_index
 		if sel is not None and 0 <= sel < len(self.controller.objects):
 			obj = self.controller.objects[sel]
@@ -40,24 +73,18 @@ class CanvasWidget(QtWidgets.QWidget):
 				painter.drawRect(rect_widget)
 
 	# TODO: Corrigir logica
-	def drawGrid(self):
-		# Cria um QPainter para desenhar diretamente no buffer
-		painter = QtGui.QPainter(self.buffer)
-		painter.setPen(QtGui.QPen(QtGui.QColor(150, 150, 150), 1, QtCore.Qt.PenStyle.DotLine))  # Linhas cinza claro pontilhadas
-
-		# Desenha linhas verticais
-		for x in range(0, self.buffer.width()):
-			painter.drawLine(x, 0, x, self.buffer.height())
-
-		# Desenha linhas horizontais
-		for y in range(0, self.buffer.height()):
-			painter.drawLine(0, y, self.buffer.width(), y)
-
-		painter.end()  # Finaliza o desenho no buffer
+	def drawGrid(self, show: bool = True):
+		# Toggle grid overlay (drawn in paintEvent between pixels)
+		self.show_grid = show
+		self.update()
 
 	def set_pixel(self, x, y, color):
 		# colore pixel
 		if 0 <= x < self.buffer.width() and 0 <= y < self.buffer.height():
+			# respect active clip region if set
+			if self.clip_rect is not None:
+				if not self.clip_rect.contains(int(x), int(y)):
+					return
 			col = QtGui.QColor(color)
 			self.buffer.setPixelColor(int(x), int(y), col)
 			self.update()
@@ -86,6 +113,10 @@ class CanvasWidget(QtWidgets.QWidget):
 		h = int(rect_buf.height() * sy)
 		return QtCore.QRect(x, y, max(1, w), max(1, h))
 
+	def set_clip_rect(self, rect_buf: QtCore.QRect | None):
+		self.clip_rect = rect_buf
+		self.update()
+
 	def mousePressEvent(self, event):
 		xw = event.position().x(); yw = event.position().y()
 		if event.button() == QtCore.Qt.MouseButton.LeftButton:
@@ -105,7 +136,7 @@ class CanvasWidget(QtWidgets.QWidget):
 class MainWindow(QtWidgets.QMainWindow):
 	def __init__(self):
 		super().__init__()
-		ui_path = os.path.join(os.path.dirname(__file__), 'ui', 'editor.ui')
+		ui_path = self.resource_path(os.path.join('ui', 'editor.ui'))
 		uic.loadUi(ui_path, self)
 
 		# state
@@ -131,10 +162,34 @@ class MainWindow(QtWidgets.QMainWindow):
 		self.toolCircleBtn.clicked.connect(lambda: self.set_tool('circle'))
 		self.toolPolyBtn.clicked.connect(lambda: self.set_tool('polygon'))
 		self.btnNew.clicked.connect(self.action_new)
-		self.listObjects.itemSelectionChanged.connect(self.on_list_selection)
+		# new: clipping tool and tree selection
+		self.toolClipBtn.clicked.connect(lambda: self.set_tool('clip'))
+		self.treeObjects.itemSelectionChanged.connect(self.on_tree_selection)
+		# grid checkbox
+		if hasattr(self, 'showGridCheck'):
+			self.showGridCheck.setChecked(True)
+			self.showGridCheck.toggled.connect(lambda v: self.canvas.drawGrid(v))
 
 		# initial UI setup
 		self.set_tool('point')
+
+		# tree root and views
+		self.views = []  # list of dicts: {'name': str, 'rect': QRect, 'objects': list}
+		self.active_view = None
+		self.treeObjects.clear()
+		root = QtWidgets.QTreeWidgetItem(["Canvas"])
+		root.setData(0, QtCore.Qt.ItemDataRole.UserRole, {'type': 'root'})
+		self.treeObjects.addTopLevelItem(root)
+		self.tree_root = root
+		self.treeObjects.expandItem(root)
+
+	def resource_path(self, relative_path: str) -> str:
+		# Helper to get path to resources for PyInstaller and dev
+		base_path = getattr(sys, '_MEIPASS', os.path.dirname(__file__))
+		# If relative path is already absolute, return as-is
+		if os.path.isabs(relative_path):
+			return relative_path
+		return os.path.join(base_path, relative_path)
 
 	def set_tool(self, tool):
 		self.current_tool = tool
@@ -160,7 +215,15 @@ class MainWindow(QtWidgets.QMainWindow):
 		self.canvasPlaceholder.layout().addWidget(self.canvas)
 		self.canvas.clear()
 		self.objects.clear()
-		self.listObjects.clear()
+		# reset views and tree
+		self.views = []
+		self.active_view = None
+		self.treeObjects.clear()
+		root = QtWidgets.QTreeWidgetItem(["Canvas"])
+		root.setData(0, QtCore.Qt.ItemDataRole.UserRole, {'type': 'root'})
+		self.treeObjects.addTopLevelItem(root)
+		self.tree_root = root
+		self.treeObjects.expandItem(root)
 		self.selected_index = None
 		self.canvas.drawGrid()
 
@@ -168,45 +231,60 @@ class MainWindow(QtWidgets.QMainWindow):
 
 	def add_object(self, obj):
 		self.objects.append({'obj':obj})
-		if isinstance(obj,Point):
-			self.listObjects.addItem(f"Point #{len(self.objects)-1}")
-		elif isinstance(obj,Line):
-			self.listObjects.addItem(f"Line #{len(self.objects)-1}")
-		elif isinstance(obj,Circle):
-			self.listObjects.addItem(f"Circle #{len(self.objects)-1}")
-		elif isinstance(obj,Polygon):
-			self.listObjects.addItem(f"Polygon #{len(self.objects)-1}")
+		idx = len(self.objects)-1
+		label = obj.__class__.__name__ + f" #{idx}"
+		node = QtWidgets.QTreeWidgetItem([label])
+		node.setData(0, QtCore.Qt.ItemDataRole.UserRole, {'type': 'object', 'index': idx})
+		self.tree_root.addChild(node)
+		self.treeObjects.expandItem(self.tree_root)
+
+	def draw_objects(self, obj_list):
+		for o in obj_list:
+			if isinstance(o, Point):
+				Drawing.paintPixel(int(o.x), int(o.y), o.color)
+			elif isinstance(o, Line):
+				if self.comboRender.currentText() == 'DDA':
+					DDA.rasterizeLine(o)
+				else:
+					BresenhamLines.rasterizeLine(o)
+			elif isinstance(o, Circle):
+				BresenhamCircle().rasterize(o)
+			elif isinstance(o, Polygon):
+				for ln in o.lines:
+					if self.comboRender.currentText() == 'DDA':
+						DDA.rasterizeLine(ln)
+					else:
+						BresenhamLines.rasterizeLine(ln)
+
+	def collect_root_objects(self):
+		return [it['obj'] for it in self.objects]
 
 	def redraw_all(self):
 		self.canvas.clear()
-		for item in self.objects:
-			item = item['obj'] 
-			if isinstance(item, Point):
-				Drawing.paintPixel(int(item.x), int(item.y), item.color)
-			elif isinstance(item, Line):
-				if self.comboRender.currentText() == 'DDA':
-					DDA().rasterizeLine(item)
-				else:
-					BresenhamLines().rasterizeLine(item)
-			elif isinstance(item, Circle):
-				BresenhamCircle().rasterize(item)
-			elif isinstance(item, Polygon):
-				for ln in item.lines:
-					if self.comboRender.currentText() == 'DDA':
-						DDA().rasterizeLine(ln)
-					else:
-						BresenhamLines().rasterizeLine(ln)
-
-	def on_list_selection(self):
-		items = self.listObjects.selectedIndexes()
-		if items:
-			self.selected_index = items[0].row()
-			item = self.objects[self.selected_index]
-			item = item['obj']
-			print(item.__str__())
+		# apply active view clip rect
+		self.canvas.set_clip_rect(self.active_view['rect'] if self.active_view else None)
+		if self.active_view:
+			self.draw_objects(self.active_view['objects'])
 		else:
+			self.draw_objects(self.collect_root_objects())
+
+	def on_tree_selection(self):
+		item = self.treeObjects.currentItem()
+		if not item:
+			return
+		data = item.data(0, QtCore.Qt.ItemDataRole.UserRole)
+		if not data:
+			return
+		if data['type'] == 'root':
+			self.active_view = None
 			self.selected_index = None
-		self.canvas.update()
+		elif data['type'] == 'view':
+			self.active_view = data['ref']
+			self.selected_index = None
+		elif data['type'] == 'object':
+			self.selected_index = data['index']
+			self.active_view = None
+		self.redraw_all()
 
 	def compute_bounding_rect(self, item):
 		item = item['obj'] 
@@ -282,6 +360,11 @@ class MainWindow(QtWidgets.QMainWindow):
 					else:
 						BresenhamLines().rasterizeLine(ln)
 				self.temp_points = []
+		elif self.current_tool == 'clip':
+			# start drag rectangle in widget coords
+			self.canvas.drag_select_start = QtCore.QPoint(x, y)
+			self.canvas.drag_select_end = QtCore.QPoint(x, y)
+			self.canvas.update()
 
 	def on_canvas_right_click(self, x, y):
 		# if click inside selected object's bbox, show transform menu
@@ -320,19 +403,82 @@ class MainWindow(QtWidgets.QMainWindow):
 				self.apply_reflect(self.selected_index, txt)
 
 	def on_canvas_move(self, x, y):
-		# support dragging selected object by left mouse + move (simple approach)
 		if QtWidgets.QApplication.mouseButtons() & QtCore.Qt.MouseButton.LeftButton:
-			if self.selected_index is not None and hasattr(self, 'last_drag_pos') and self.last_drag_pos is not None:
-				dx = x - self.last_drag_pos[0]
-				dy = y - self.last_drag_pos[1]
-				self.apply_translation(self.selected_index, dx, dy)
-				self.last_drag_pos = (x,y)
-		else:
-			# update last pos when mouse pressed in bbox
-			pass
+			if self.current_tool == 'clip' and self.canvas.drag_select_start is not None:
+				self.canvas.drag_select_end = QtCore.QPoint(x, y)
+				self.canvas.update()
 
 	def on_canvas_release(self):
-		self.last_drag_pos = None
+		if self.current_tool == 'clip' and self.canvas.drag_select_start and self.canvas.drag_select_end:
+			p1 = self.canvas.drag_select_start
+			p2 = self.canvas.drag_select_end
+			bx1, by1 = self.canvas.widget_to_buffer(p1.x(), p1.y())
+			bx2, by2 = self.canvas.widget_to_buffer(p2.x(), p2.y())
+			x1, x2 = sorted([bx1, bx2])
+			y1, y2 = sorted([by1, by2])
+			rect = QtCore.QRect(x1, y1, max(1, x2-x1+1), max(1, y2-y1+1))
+			self.create_view(rect)
+			self.canvas.drag_select_start = None
+			self.canvas.drag_select_end = None
+	def create_view(self, rect_buf: QtCore.QRect):
+		# Build a view containing clipped objects according to selected algorithm
+		algo = self.comboClipping.currentText()
+		view_objects = []
+		if algo not in ('Cohen-Sutherland', 'Liang-Barsky'):
+			# no specific clipping: include objects that intersect rect (bbox tests)
+			for it in self.objects:
+				obj = it['obj']
+				if isinstance(obj, Point):
+					if rect_buf.contains(int(obj.x), int(obj.y)):
+						view_objects.append(Point(obj.x, obj.y, obj.color))
+				elif isinstance(obj, Line):
+					view_objects.append(Line(Point(obj.pointA.x, obj.pointA.y), Point(obj.pointB.x, obj.pointB.y), obj.color))
+				elif isinstance(obj, Circle):
+					view_objects.append(Circle(Point(obj.center.x, obj.center.y), obj.radius, obj.color))
+				elif isinstance(obj, Polygon):
+					lines = [Line(Point(ln.pointA.x, ln.pointA.y), Point(ln.pointB.x, ln.pointB.y), ln.color) for ln in obj.lines]
+					view_objects.append(Polygon(lines))
+		else:
+			for it in self.objects:
+				obj = it['obj']
+				if algo == 'Cohen-Sutherland':
+					clipper = ClippingCS(rect_buf.left(), rect_buf.right(), rect_buf.top(), rect_buf.bottom())
+				else:
+					clipper = ClippingLB(rect_buf.left(), rect_buf.right(), rect_buf.top(), rect_buf.bottom())
+				if isinstance(obj, Point):
+					if rect_buf.contains(int(obj.x), int(obj.y)):
+						view_objects.append(Point(obj.x, obj.y, obj.color))
+				elif isinstance(obj, Line):
+					cl = clipper.clip_line(obj)
+					if cl is not None:
+						view_objects.append(Line(cl.pointA, cl.pointB, obj.color))
+				elif isinstance(obj, Circle):
+					# simple include if bbox intersects
+					xs = [obj.center.x - obj.radius, obj.center.x + obj.radius]
+					ys = [obj.center.y - obj.radius, obj.center.y + obj.radius]
+					cb = QtCore.QRect(min(xs), min(ys), abs(xs[1]-xs[0])+1, abs(ys[1]-ys[0])+1)
+					if rect_buf.intersects(cb):
+						view_objects.append(Circle(Point(obj.center.x, obj.center.y), obj.radius, obj.color))
+				elif isinstance(obj, Polygon):
+					clipped_lines = []
+					for ln in obj.lines:
+						cl = clipper.clip_line(ln)
+						if cl is not None:
+							clipped_lines.append(Line(cl.pointA, cl.pointB, ln.color))
+					if clipped_lines:
+						view_objects.append(Polygon(clipped_lines))
+		# register view in tree
+		name = f"Viewport {len(self.views)+1}"
+		view = {'name': name, 'rect': rect_buf, 'objects': view_objects}
+		self.views.append(view)
+		node = QtWidgets.QTreeWidgetItem([name])
+		node.setData(0, QtCore.Qt.ItemDataRole.UserRole, {'type': 'view', 'ref': view})
+		self.tree_root.addChild(node)
+		self.treeObjects.expandItem(node)
+		# activate view
+		self.active_view = view
+		self.treeObjects.setCurrentItem(node)
+		self.redraw_all()
 
 	def apply_translation(self, idx, dx, dy):
 		item = self.objects[idx]
@@ -399,7 +545,7 @@ class MainWindow(QtWidgets.QMainWindow):
 		elif isinstance(obj,Line):
 			obj.pointA.x, obj.pointA.y = sc(obj.pointA.x, obj.pointA.y)
 			obj.pointB.x, obj.pointB.y = sc(obj.pointB.x, obj.pointB.y)
-			print("bosta")
+
 		elif isinstance(obj,Circle):
 			obj.center.x, obj.center.y = sc(obj.center.x, obj.center.y)
 			obj.radius = int(obj.radius * (sx+sy)/2)
@@ -433,8 +579,8 @@ class MainWindow(QtWidgets.QMainWindow):
 			item.center.x,item.center.y = rft(item.center.x, item.center.y,axis=axis)
 		elif isinstance(item,Polygon):
 			for ln in item.lines:
-				ln.pointA.x,item.pointA.y = rft(ln.pointA.x,ln.pointA.y,axis=axis)
-				ln.pointB.x,item.pointB.y = rft(ln.pointB.x,ln.pointB.y,axis=axis)
+				ln.pointA.x, ln.pointA.y = rft(ln.pointA.x, ln.pointA.y, axis=axis)
+				ln.pointB.x, ln.pointB.y = rft(ln.pointB.x, ln.pointB.y, axis=axis)
 		self.redraw_all()
 
 
