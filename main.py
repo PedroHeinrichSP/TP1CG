@@ -5,7 +5,6 @@ import os
 from utils.drawable import Drawing, Point, Line, Circle, Polygon
 from utils.algorithms import Transformations, DDA, BresenhamLines, BresenhamCircle, ClippingCS, ClippingLB
 
-
 class CanvasWidget(QtWidgets.QWidget):
 	def __init__(self, controller, buffer_width=80, buffer_height=80):
 		super().__init__()
@@ -92,7 +91,6 @@ class CanvasWidget(QtWidgets.QWidget):
 			painter.drawLine(cx-6, cy, cx+6, cy)
 			painter.drawLine(cx, cy-6, cx, cy+6)
 
-	# TODO: Corrigir logica
 	def drawGrid(self, show: bool = True):
 		# Toggle grid overlay (drawn in paintEvent between pixels)
 		self.show_grid = show
@@ -159,7 +157,6 @@ class CanvasWidget(QtWidgets.QWidget):
 	def mouseReleaseEvent(self, event):
 		if event.button() == QtCore.Qt.MouseButton.LeftButton:
 			self.controller.on_canvas_release()
-
 
 class MainWindow(QtWidgets.QMainWindow):
 	def __init__(self):
@@ -262,8 +259,6 @@ class MainWindow(QtWidgets.QMainWindow):
 		self.canvas.drawGrid()
 		# reset pivot
 		self.canvas.set_pivot(None, None)
-
-
 
 	def add_object(self, obj):
 		self.objects.append({'obj':obj})
@@ -518,7 +513,6 @@ class MainWindow(QtWidgets.QMainWindow):
 				ln.pointB.x,ln.pointB.y = Transformations.translate(ln.pointB.x,ln.pointB.y, dx, dy)
 		self.redraw_all()
 
-	#TODO: select a point in the object as rotation origin
 	def apply_rotation(self, idx, angle_deg):
 		item = self.objects[idx]
 		rect = self.compute_bounding_rect(item)
@@ -551,7 +545,6 @@ class MainWindow(QtWidgets.QMainWindow):
 				ln.pointB.x, ln.pointB.y = rot_point(ln.pointB.x, ln.pointB.y)
 		self.redraw_all()
 
-	#TODO: select a point in the object as scale origin
 	def apply_scale(self, idx, sx, sy):
 		item = self.objects[idx]
 		rect = self.compute_bounding_rect(item)
@@ -617,13 +610,11 @@ class MainWindow(QtWidgets.QMainWindow):
 				ln.pointB.x, ln.pointB.y = rft(ln.pointB.x, ln.pointB.y, axis=axis)
 		self.redraw_all()
 
-
 def main():
 	app = QtWidgets.QApplication(sys.argv)
 	w = MainWindow()
 	w.show()
 	sys.exit(app.exec())
-
 
 if __name__ == '__main__':
 	main()
