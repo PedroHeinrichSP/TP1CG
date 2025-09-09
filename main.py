@@ -1,3 +1,11 @@
+"""Aplicação PyQt para desenho e transformações 2D.
+
+Este módulo provê a janela principal e o widget de canvas com buffer lógico
+pequeno para evidenciar algoritmos de rasterização (DDA/Bresenham), além de
+operações de recorte (Cohen–Sutherland, Liang–Barsky) e transformações
+geométricas (translação, rotação, escala e reflexão).
+"""
+
 from PyQt6 import uic, QtWidgets, QtGui, QtCore
 import sys
 import os
@@ -6,36 +14,42 @@ from utils.drawable import Drawing, Point, Line, Circle, Polygon
 from utils.algorithms import Transformations, DDA, BresenhamLines, BresenhamCircle, ClippingCS, ClippingLB
 
 class CanvasWidget(QtWidgets.QWidget):
+	"""Widget de desenho com buffer lógico.
+
+	Mantém uma QImage de baixa resolução (buffer_w x buffer_h) que é escalada
+	para o tamanho do widget, facilitando a visualização dos pixels.
+	"""
+
 	def __init__(self, controller, buffer_width=80, buffer_height=80):
 		super().__init__()
 		self.controller = controller
-		# logical buffer resolution (small) to show rasterization differences
+		# resolução lógica do buffer (pequena para evidenciar rasterização)
 		self.buffer_w = max(1, int(buffer_width))
 		self.buffer_h = max(1, int(buffer_height))
 		self.buffer = QtGui.QImage(self.buffer_w, self.buffer_h, QtGui.QImage.Format.Format_RGB32)
 		self.buffer.fill(QtGui.QColor('white'))
-		# allow the widget to expand to fill the available area
+		# permite expandir para ocupar a área disponível
 		self.setSizePolicy(QtWidgets.QSizePolicy.Policy.Expanding, QtWidgets.QSizePolicy.Policy.Expanding)
 		self.setMouseTracking(True)
 		self.dragging = False
 		self.drag_start = None
 		self.setFocusPolicy(QtCore.Qt.FocusPolicy.ClickFocus)
-		# logical clip rect in buffer coords (limits pixel writes when active view selected)
+		# retângulo de recorte lógico em coords de buffer (limitador de escrita)
 		self.clip_rect = None
-		# optional overlay selection rect in widget coords (for clipping drag)
+		# retângulo de seleção (overlay) em coords de widget (durante arrasto)
 		self.drag_select_start = None
 		self.drag_select_end = None
-		# grid overlay flag
+		# grade (linhas) sobre o canvas
 		self.show_grid = True
-		# pivot (buffer coords) for transforms
+		# pivô (coords de buffer) para transformações
 		self.pivot_point = None
 
-	# Pinta a bounding box
 	def paintEvent(self, event):
+		"""Desenha a imagem de buffer escalada e sobreposições (grade, seleção, pivô)."""
 		painter = QtGui.QPainter(self)
 		scaled = self.buffer.scaled(self.width(), self.height(), QtCore.Qt.AspectRatioMode.IgnoreAspectRatio, QtCore.Qt.TransformationMode.FastTransformation)
 		painter.drawImage(0, 0, scaled)
-		# draw grid overlay between pixels for better counting/visualization
+		# grade entre pixels para facilitar contagem/visualização
 		if self.show_grid and self.buffer_w > 0 and self.buffer_h > 0:
 			pen = QtGui.QPen(QtGui.QColor(180, 180, 180, 160))
 			pen.setCosmetic(True)
@@ -43,17 +57,17 @@ class CanvasWidget(QtWidgets.QWidget):
 			painter.setPen(pen)
 			cell_w = self.width() / self.buffer_w
 			cell_h = self.height() / self.buffer_h
-			# vertical lines
+			# linhas verticais
 			for i in range(1, self.buffer_w):
 				x = round(i * cell_w)
 				painter.drawLine(x, 0, x, self.height())
-			# horizontal lines
+			# linhas horizontais
 			for j in range(1, self.buffer_h):
 				y = round(j * cell_h)
 				painter.drawLine(0, y, self.width(), y)
-			# outer border
+			# borda externa
 			painter.drawRect(0, 0, self.width()-1, self.height()-1)
-		# draw overlay drag rectangle if present (widget coords)
+		# retângulo de seleção durante o arrasto
 		if self.drag_select_start and self.drag_select_end:
 			pen = QtGui.QPen(QtGui.QColor(0, 180, 255))
 			pen.setStyle(QtCore.Qt.PenStyle.DashLine)
@@ -70,12 +84,12 @@ class CanvasWidget(QtWidgets.QWidget):
 			painter.setPen(pen)
 			painter.drawRect(rect_widget)
 
-		# draw pivot marker (cross) at selected pivot pixel
+		# marca do pivô (cruz) no pixel selecionado
 		if self.pivot_point is not None:
 			bx, by = self.pivot_point
 			sx = self.width() / max(1, self.buffer_w)
 			sy = self.height() / max(1, self.buffer_h)
-			# Align to the rounded pixel rectangle to match grid lines
+			# alinhar com o retângulo do pixel para combinar com a grade
 			x0 = int(round(bx * sx))
 			x1 = int(round((bx + 1) * sx)) - 1
 			y0 = int(round(by * sy))
@@ -89,14 +103,13 @@ class CanvasWidget(QtWidgets.QWidget):
 			painter.drawLine(cx, cy-6, cx, cy+6)
 
 	def drawGrid(self, show: bool = True):
-		# Toggle grid overlay (drawn in paintEvent between pixels)
+		"""Liga/desliga a grade de visualização."""
 		self.show_grid = show
 		self.update()
 
 	def set_pixel(self, x, y, color):
-		# colore pixel
+		"""Define a cor de um pixel no buffer, respeitando o recorte ativo."""
 		if 0 <= x < self.buffer.width() and 0 <= y < self.buffer.height():
-			# respect active clip region if set
 			if self.clip_rect is not None:
 				if not self.clip_rect.contains(int(x), int(y)):
 					return
@@ -105,11 +118,12 @@ class CanvasWidget(QtWidgets.QWidget):
 			self.update()
 
 	def clear(self, color='white'):
+		"""Limpa o buffer com a cor especificada."""
 		self.buffer.fill(QtGui.QColor(color))
 		self.update()
 
 	def widget_to_buffer(self, x, y):
-		# map widget coordinates to buffer coordinates
+		"""Converte coords do widget para coords do buffer lógico."""
 		if self.width() == 0 or self.height() == 0:
 			return 0, 0
 		bx = int(x * self.buffer_w / self.width())
@@ -119,7 +133,7 @@ class CanvasWidget(QtWidgets.QWidget):
 		return bx, by
 
 	def buffer_rect_to_widget(self, rect_buf):
-		# rect_buf is QRect in buffer coords
+		"""Converte um QRect em coords de buffer para coords do widget."""
 		sx = self.width() / max(1, self.buffer_w)
 		sy = self.height() / max(1, self.buffer_h)
 		x = int(rect_buf.x() * sx)
@@ -129,11 +143,12 @@ class CanvasWidget(QtWidgets.QWidget):
 		return QtCore.QRect(x, y, max(1, w), max(1, h))
 
 	def set_clip_rect(self, rect_buf: QtCore.QRect | None):
+		"""Define o retângulo de recorte ativo (coords de buffer) ou limpa-o."""
 		self.clip_rect = rect_buf
 		self.update()
 
 	def set_pivot(self, bx=None, by=None):
-		"""Set pivot in buffer coords; pass None to clear."""
+		"""Define o pivô em coords de buffer; passe None para limpar."""
 		if bx is None or by is None:
 			self.pivot_point = None
 		else:
@@ -156,6 +171,8 @@ class CanvasWidget(QtWidgets.QWidget):
 			self.controller.on_canvas_release()
 
 class MainWindow(QtWidgets.QMainWindow):
+	"""Janela principal: gerencia objetos, ferramentas, views e canvas."""
+
 	def __init__(self):
 		super().__init__()
 		ui_path = self.resource_path(os.path.join('ui', 'editor.ui'))
@@ -168,29 +185,29 @@ class MainWindow(QtWidgets.QMainWindow):
 		self.selected_index = None
 		self.temp_points = []
 
-		# create canvas widget inside placeholder (small buffer to highlight raster differences)
+	# cria o canvas (buffer pequeno para evidenciar diferenças de raster)
 		self.canvas = CanvasWidget(self, buffer_width=80, buffer_height=80)
 		Drawing.set_canvas(self.canvas)
-		# ensure placeholder has a layout to host the widget
+	# garante que o placeholder tenha um layout para hospedar o widget
 		if not hasattr(self.canvasPlaceholder, 'layout') or self.canvasPlaceholder.layout() is None:
 			self.canvasPlaceholder.setLayout(QtWidgets.QVBoxLayout())
 		self.canvasPlaceholder.layout().setContentsMargins(0,0,0,0)
 		self.canvasPlaceholder.layout().addWidget(self.canvas)
 
-		# connect UI
+	# conexões de UI
 		self.colorButton.clicked.connect(self.choose_color)
 		self.toolPointBtn.clicked.connect(lambda: self.set_tool('point'))
 		self.toolLineBtn.clicked.connect(lambda: self.set_tool('line'))
 		self.toolCircleBtn.clicked.connect(lambda: self.set_tool('circle'))
 		self.toolPolyBtn.clicked.connect(lambda: self.set_tool('polygon'))
 		self.btnNew.clicked.connect(self.action_new)
-		# new: clipping tool and tree selection
+	# ferramenta de recorte e seleção na árvore
 		self.toolClipBtn.clicked.connect(lambda: self.set_tool('clip'))
-		# pivot selection tool
+	# ferramenta de seleção do pivô
 		if hasattr(self, 'toolPivotBtn'):
 			self.toolPivotBtn.clicked.connect(lambda: self.set_tool('pivot'))
 		self.treeObjects.itemSelectionChanged.connect(self.on_tree_selection)
-		# grid checkbox
+	# checkbox da grade
 		if hasattr(self, 'showGridCheck'):
 			self.showGridCheck.setChecked(True)
 			self.showGridCheck.toggled.connect(lambda v: self.canvas.drawGrid(v))
@@ -198,8 +215,8 @@ class MainWindow(QtWidgets.QMainWindow):
 		# initial UI setup
 		self.set_tool('point')
 
-		# tree root and views
-		self.views = []  # list of dicts: {'name': str, 'rect': QRect, 'objects': list}
+	# raiz da árvore e views
+		self.views = []  # [{'name': str, 'rect': QRect, 'objects': list}]
 		self.active_view = None
 		self.selected_view_obj_index = None
 		self.treeObjects.clear()
@@ -208,43 +225,43 @@ class MainWindow(QtWidgets.QMainWindow):
 		self.treeObjects.addTopLevelItem(root)
 		self.tree_root = root
 		self.treeObjects.expandItem(root)
-		# ensure a clipping algorithm is selected by default
+		# garante um algoritmo de recorte selecionado por padrão
 		if hasattr(self, 'comboClipping') and self.comboClipping.count() > 0:
 			self.comboClipping.setCurrentIndex(0)
 
 	def resource_path(self, relative_path: str) -> str:
-		# Helper to get path to resources for PyInstaller and dev
+		"""Resolve caminho de recursos (compatível com PyInstaller e dev)."""
 		base_path = getattr(sys, '_MEIPASS', os.path.dirname(__file__))
-		# If relative path is already absolute, return as-is
 		if os.path.isabs(relative_path):
 			return relative_path
 		return os.path.join(base_path, relative_path)
 
 	def set_tool(self, tool):
+		"""Seleciona a ferramenta atual (point, line, circle, polygon, clip, pivot)."""
 		self.current_tool = tool
-		# if switching tool, reset temp
 		self.temp_points = []
 
 	def choose_color(self):
+		"""Abre um seletor de cores e aplica a cor atual."""
 		col = QtWidgets.QColorDialog.getColor(QtGui.QColor(self.current_color), self)
 		if col.isValid():
 			self.current_color = col.name()
 			self.colorButton.setStyleSheet(f'background: {self.current_color};')
 
 	def action_new(self):
-		# request buffer resolution
+		"""Cria um novo canvas solicitando resolução do buffer ao usuário."""
 		w, ok = QtWidgets.QInputDialog.getInt(self, 'Largura (pixels)', 'Largura (buffer):', 80, 4, 200)
 		if not ok: return
 		h, ok = QtWidgets.QInputDialog.getInt(self, 'Altura (pixels)', 'Altura (buffer):', 80, 4, 200)
 		if not ok: return
-		# recreate canvas with small logical buffer
+		# recria o canvas com buffer lógico pequeno
 		self.canvas.setParent(None)
 		self.canvas = CanvasWidget(self, buffer_width=w, buffer_height=h)
 		Drawing.set_canvas(self.canvas)
 		self.canvasPlaceholder.layout().addWidget(self.canvas)
 		self.canvas.clear()
 		self.objects.clear()
-		# reset views and tree
+		# reseta views e árvore
 		self.views = []
 		self.active_view = None
 		self.treeObjects.clear()
@@ -255,10 +272,11 @@ class MainWindow(QtWidgets.QMainWindow):
 		self.treeObjects.expandItem(root)
 		self.selected_index = None
 		self.canvas.drawGrid()
-		# reset pivot
+		# limpa pivô
 		self.canvas.set_pivot(None, None)
 
 	def add_object(self, obj):
+		"""Adiciona um objeto à lista e à árvore de objetos."""
 		self.objects.append({'obj':obj})
 		idx = len(self.objects)-1
 		label = obj.__class__.__name__ + f" #{idx}"
@@ -268,6 +286,7 @@ class MainWindow(QtWidgets.QMainWindow):
 		self.treeObjects.expandItem(self.tree_root)
 
 	def draw_objects(self, obj_list):
+		"""Desenha uma lista de objetos usando o algoritmo selecionado."""
 		for o in obj_list:
 			if isinstance(o, Point):
 				Drawing.paintPixel(int(o.x), int(o.y), o.color)
@@ -286,11 +305,12 @@ class MainWindow(QtWidgets.QMainWindow):
 						BresenhamLines.rasterizeLine(ln)
 
 	def collect_root_objects(self):
+		"""Retorna apenas os objetos da raiz (fora de views)."""
 		return [it['obj'] for it in self.objects]
 
 	def redraw_all(self):
+		"""Limpa e redesenha a cena conforme a view ativa (se houver)."""
 		self.canvas.clear()
-		# apply active view clip rect
 		self.canvas.set_clip_rect(self.active_view['rect'] if self.active_view else None)
 		if self.active_view:
 			self.draw_objects(self.active_view['objects'])
@@ -298,6 +318,7 @@ class MainWindow(QtWidgets.QMainWindow):
 			self.draw_objects(self.collect_root_objects())
 
 	def on_tree_selection(self):
+		"""Atualiza seleção (raiz/view/objeto) a partir da árvore."""
 		item = self.treeObjects.currentItem()
 		if not item:
 			return
@@ -313,7 +334,7 @@ class MainWindow(QtWidgets.QMainWindow):
 			self.selected_index = None
 			self.selected_view_obj_index = None
 		elif data['type'] == 'view-object':
-			# select an object inside the active view
+			# seleciona um objeto dentro da view ativa
 			self.active_view = data['view']
 			self.selected_view_obj_index = data['index']
 			self.selected_index = None
@@ -324,16 +345,16 @@ class MainWindow(QtWidgets.QMainWindow):
 		self.redraw_all()
 
 	def get_selected_rect_buf(self):
-		# Determine bbox for selected item (root or view)
+		"""Retorna o retângulo (buffer) do item atualmente selecionado."""
 		if self.selected_index is not None:
 			return self.compute_bounding_rect(self.objects[self.selected_index])
 		if self.active_view and self.selected_view_obj_index is not None:
 			obj = self.active_view['objects'][self.selected_view_obj_index]
-			# wrap minimal dict to reuse compute_bounding_rect
 			return self.compute_bounding_rect({'obj': obj})
 		return None
 
 	def compute_bounding_rect(self, item):
+		"""Calcula o QRect (coords de buffer) que envolve o item dado."""
 		item = item['obj'] 
 		xs, ys = [], []
 		if isinstance(item, Point):
@@ -355,11 +376,11 @@ class MainWindow(QtWidgets.QMainWindow):
 		return QtCore.QRect(x1, y1, x2 - x1 + 1, y2 - y1 + 1)
 
 	def compute_bounding_rect_buf(self, item):
-		# same as compute_bounding_rect but returns QRect in buffer coordinates
+		"""Alias de compute_bounding_rect (coords já em buffer)."""
 		return self.compute_bounding_rect(item)
 
 	def on_canvas_left_click(self, x, y):
-		# map widget coords to buffer coords
+		"""Trata cliques com botão esquerdo no canvas (desenho e seleção)."""
 		bx, by = self.canvas.widget_to_buffer(x, y)
 		if self.current_tool == 'point':
 			p = Point(bx, by, self.current_color)
@@ -372,7 +393,6 @@ class MainWindow(QtWidgets.QMainWindow):
 				b = Point(*self.temp_points[1])
 				l = Line(a,b, self.current_color)
 				self.add_object(l)
-				# draw
 				if self.comboRender.currentText() == 'DDA':
 					DDA().rasterizeLine(line=l)
 				else:
@@ -389,10 +409,10 @@ class MainWindow(QtWidgets.QMainWindow):
 				BresenhamCircle().rasterize(c)
 				self.temp_points = []
 		elif self.current_tool == 'polygon':
-			# append point; expect user to return to origin to finish
+			# adiciona ponto; espera retorno próximo à origem para fechar
 			self.temp_points.append((bx,by))
 			if len(self.temp_points) > 1 and (abs(bx - self.temp_points[0][0]) < 3 and abs(by - self.temp_points[0][1]) < 3 and len(self.temp_points) > 2):
-				# close polygon
+				# fecha o polígono
 				pts = self.temp_points[:-1]
 				lines = []
 				for i in range(len(pts)):
@@ -408,23 +428,22 @@ class MainWindow(QtWidgets.QMainWindow):
 						BresenhamLines().rasterizeLine(ln)
 				self.temp_points = []
 		elif self.current_tool == 'clip':
-			# start drag rectangle in widget coords
+			# inicia o retângulo de seleção em coords de widget
 			self.canvas.drag_select_start = QtCore.QPoint(x, y)
 			self.canvas.drag_select_end = QtCore.QPoint(x, y)
 			self.canvas.update()
 		elif self.current_tool == 'pivot':
-			# set pivot to clicked buffer pixel
+			# define o pivô para o pixel clicado
 			self.canvas.set_pivot(bx, by)
-			# keep current selection/tool otherwise
 
 	def on_canvas_right_click(self, x, y):
-		# Show context menu for either a root object or a viewport object under/right-click
+		"""Menu de contexto para aplicar transformações no item clicado."""
 		bx, by = self.canvas.widget_to_buffer(x, y)
-		# Determine target: prefer current selection; if none, try simple hit-test
+		# alvo: preferir a seleção atual; caso contrário, um hit-test simples
 		target_kind = None
 		target_index = None
 		item_wrapper = None
-		# 1) If a view object is selected
+		# 1) objeto de view selecionado
 		if self.active_view and self.selected_view_obj_index is not None:
 			obj = self.active_view['objects'][self.selected_view_obj_index]
 			item_wrapper = {'obj': obj}
@@ -432,14 +451,14 @@ class MainWindow(QtWidgets.QMainWindow):
 			if rect and rect.contains(bx, by):
 				target_kind = 'view'
 				target_index = self.selected_view_obj_index
-		# 2) Else if a root object is selected
+		# 2) objeto da raiz selecionado
 		elif self.selected_index is not None:
 			item_wrapper = self.objects[self.selected_index]
 			rect = self.compute_bounding_rect(item_wrapper)
 			if rect and rect.contains(bx, by):
 				target_kind = 'root'
 				target_index = self.selected_index
-		# 3) Else try hit-test on active view objects (if any)
+		# 3) hit-test nos objetos da view ativa
 		elif self.active_view:
 			for i, vo in enumerate(self.active_view['objects']):
 				wrap = {'obj': vo}
@@ -450,7 +469,7 @@ class MainWindow(QtWidgets.QMainWindow):
 					target_kind = 'view'
 					target_index = i
 					break
-		# 4) Else hit-test root objects
+		# 4) hit-test nos objetos da raiz
 		else:
 			for i, it in enumerate(self.objects):
 				rect = self.compute_bounding_rect(it)
@@ -495,12 +514,14 @@ class MainWindow(QtWidgets.QMainWindow):
 			self.apply_reflect(target_index if target_kind == 'root' else None, txt)
 
 	def on_canvas_move(self, x, y):
+		"""Atualiza o retângulo de seleção durante o arrasto do recorte."""
 		if QtWidgets.QApplication.mouseButtons() & QtCore.Qt.MouseButton.LeftButton:
 			if self.current_tool == 'clip' and self.canvas.drag_select_start is not None:
 				self.canvas.drag_select_end = QtCore.QPoint(x, y)
 				self.canvas.update()
 
 	def on_canvas_release(self):
+		"""Finaliza a seleção do recorte e cria uma view com os objetos recortados."""
 		if self.current_tool == 'clip' and self.canvas.drag_select_start and self.canvas.drag_select_end:
 			p1 = self.canvas.drag_select_start
 			p2 = self.canvas.drag_select_end
@@ -513,7 +534,7 @@ class MainWindow(QtWidgets.QMainWindow):
 			self.canvas.drag_select_start = None
 			self.canvas.drag_select_end = None
 	def create_view(self, rect_buf: QtCore.QRect):
-		# Build a view containing clipped objects according to selected algorithm
+		"""Cria uma view contendo objetos recortados pelo algoritmo escolhido."""
 		algo = self.comboClipping.currentText()
 		view_objects = []
 		for it in self.objects:
@@ -527,7 +548,7 @@ class MainWindow(QtWidgets.QMainWindow):
 				if cl is not None:
 					view_objects.append(Line(cl.pointA, cl.pointB, obj.color))
 			elif isinstance(obj, Circle):
-				# simple include if bbox intersects
+				# inclusão simples se a bbox intersecta
 				xs = [obj.center.x - obj.radius, obj.center.x + obj.radius]
 				ys = [obj.center.y - obj.radius, obj.center.y + obj.radius]
 				cb = QtCore.QRect(min(xs), min(ys), abs(xs[1]-xs[0])+1, abs(ys[1]-ys[0])+1)
@@ -561,7 +582,7 @@ class MainWindow(QtWidgets.QMainWindow):
 		self.redraw_all()
 
 	def apply_translation(self, idx, dx, dy):
-		# If a view object is selected, transform it; else transform root object
+		"""Aplica translação ao objeto alvo (na view ativa ou na raiz)."""
 		if self.active_view and self.selected_view_obj_index is not None and idx is None:
 			obj = self.active_view['objects'][self.selected_view_obj_index]
 			target = {'obj': obj}
@@ -582,6 +603,7 @@ class MainWindow(QtWidgets.QMainWindow):
 		self.redraw_all()
 
 	def apply_rotation(self, idx, angle_deg):
+		"""Aplica rotação (em graus) ao redor do pivô ou centro da bbox."""
 		if self.active_view and self.selected_view_obj_index is not None and idx is None:
 			target = {'obj': self.active_view['objects'][self.selected_view_obj_index]}
 		else:
@@ -591,14 +613,14 @@ class MainWindow(QtWidgets.QMainWindow):
 		item = item['obj']
 		
 		if not rect: return
-		# use pivot if set; else center of bbox
+		# usa pivô se definido; senão, centro da bbox
 		if self.canvas.pivot_point is not None:
 			cx, cy = self.canvas.pivot_point
 		else:
 			cx = rect.x() + rect.width()/2
 			cy = rect.y() + rect.height()/2
 
-		#rotate around point (center)
+		# rotaciona ao redor do ponto (cx, cy)
 		def rot_point(px,py):
 			nx = px - cx; ny = py - cy
 			rx, ry = Transformations.rotate(nx, ny, angle_deg)
@@ -618,6 +640,7 @@ class MainWindow(QtWidgets.QMainWindow):
 		self.redraw_all()
 
 	def apply_scale(self, idx, sx, sy):
+		"""Aplica escala em torno do pivô ou centro da bbox (sx, sy)."""
 		if self.active_view and self.selected_view_obj_index is not None and idx is None:
 			target = {'obj': self.active_view['objects'][self.selected_view_obj_index]}
 		else:
@@ -625,14 +648,14 @@ class MainWindow(QtWidgets.QMainWindow):
 		item = target
 		rect = self.compute_bounding_rect(item)
 		if not rect: return
-		# use pivot if set; else center of bbox
+		# usa pivô se definido; senão, centro da bbox
 		if self.canvas.pivot_point is not None:
 			cx, cy = self.canvas.pivot_point
 		else:
 			cx = rect.x() + rect.width()/2
 			cy = rect.y() + rect.height()/2
 
-		#scale around point (center)
+		# escala ao redor do ponto (cx, cy)
 		def sc(px,py):
 			nx = px - cx; ny = py - cy
 			rx, ry = Transformations.scale(nx, ny, sx, sy)
@@ -656,6 +679,7 @@ class MainWindow(QtWidgets.QMainWindow):
 
 	#TODO: select a point in the object as reflect origin
 	def apply_reflect(self, idx, axis):
+		"""Reflete em torno do pivô ou centro da bbox (eixos: 'x', 'y' ou 'yx')."""
 		if self.active_view and self.selected_view_obj_index is not None and idx is None:
 			target = {'obj': self.active_view['objects'][self.selected_view_obj_index]}
 		else:
@@ -663,7 +687,7 @@ class MainWindow(QtWidgets.QMainWindow):
 		item = target
 		rect = self.compute_bounding_rect(item)
 		if not rect: return
-		# use pivot if set; else center of bbox
+		# usa pivô se definido; senão, centro da bbox
 		if self.canvas.pivot_point is not None:
 			cx, cy = self.canvas.pivot_point
 		else:
@@ -671,7 +695,7 @@ class MainWindow(QtWidgets.QMainWindow):
 			cy = rect.y() + rect.height()/2
 		item = item['obj']
 
-		#reflect around point (center)
+		# reflexão ao redor do ponto (cx, cy)
 		def rft(px, py, axis):
 			nx = px - cx; ny = py - cy
 			rx, ry = Transformations.reflect(nx, ny, axis)
@@ -691,6 +715,7 @@ class MainWindow(QtWidgets.QMainWindow):
 		self.redraw_all()
 
 def main():
+	"""Ponto de entrada da aplicação."""
 	app = QtWidgets.QApplication(sys.argv)
 	w = MainWindow()
 	w.show()
