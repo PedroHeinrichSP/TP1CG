@@ -41,8 +41,8 @@ class DDA:
     @staticmethod
     def rasterizeLine(line=None, xA=None, yA=None, xB=None, yB=None):
         if line is not None: xA, yA, xB, yB = line.pointA.x, line.pointA.y, line.pointB.x, line.pointB.y
-        deltaX = xA - xB
-        deltaY = yA - yB
+        deltaX = xB - xA
+        deltaY = yB - yA
         x = float(xA)
         y = float(yA)
         Drawing.paintPixel(int(x), int(y), line.color)
@@ -53,10 +53,10 @@ class DDA:
         yIncr = deltaY/steps
 
         for _ in range(int(steps)):
-            x -= xIncr
-            y -= yIncr
+            x += xIncr
+            y += yIncr
             # Pela forma como float funciona é necessário o "+ 0.000001" para garantir que frações que gerem 5 no final sejam aproximadas pra cima
-            Drawing.paintPixel(round(x + 0.000001), round(y+ 0.000001), line.color)
+            Drawing.paintPixel(int(x), int(y), line.color)
 
 
 
@@ -248,5 +248,6 @@ class ClippingLB:
                                     Point(round(xB + 0.000001), round(yB + 0.000001)),
                                     getattr(line, 'color', None))
         return None
+
 
 
