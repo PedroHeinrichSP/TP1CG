@@ -13,7 +13,9 @@ Editor gráfico simples em PyQt6 que integra os algoritmos do diretório `utils/
 
 ```bash
 python -m venv .venv
-source .venv/bin/activate
+source .venv/bin/activate ## Se for Linux
+.venv\Scripts\activate.bat ## Se for Windows no cmd
+.venv\Scripts\Activate.bat ## se for Windows no PowerShell
 ```
 
 2) Instalar dependências:
